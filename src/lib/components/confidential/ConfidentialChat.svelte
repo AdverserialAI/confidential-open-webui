@@ -205,7 +205,7 @@
 		<div>
 			<p class="eyebrow">CONFIDENTIAL INFERENCE</p>
 			<h2>Verify before you send.</h2>
-			<p>The browser verifies the signed policy, TEE and GPU evidence, and attested EHBP key before it encrypts a prompt. The relay receives ciphertext and an entitlement, never this page’s API credential.</p>
+			<p>The browser verifies the signed policy, TEE and GPU evidence, and attested EHBP key before it encrypts a prompt. The attested API receives ciphertext and a one-use entitlement directly; Open WebUI never receives this page’s API credential, prompt, or completion.</p>
 		</div>
 		<div class:verified={$confidentialRuntime.status === 'verified'} class="status">
 			{$confidentialRuntime.status === 'verified' ? 'Runtime verified locally' : $confidentialRuntime.status === 'verifying' ? 'Verifying evidence…' : 'Verification required'}

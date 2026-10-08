@@ -3,7 +3,7 @@
  *
  * Open WebUI keeps the sign-in session.  This module uses that session only
  * for a short-lived billing entitlement; it verifies the live runtime, encrypts
- * the request with EHBP, and routes ciphertext through the same-origin relay.
+ * the request with EHBP, and sends ciphertext directly to the attested API.
  * Do not add a plaintext fallback here: a failed proof must leave the prompt
  * unsent.
  */
@@ -96,9 +96,7 @@ const endpointOrigin = (value: string) => {
 };
 
 // WEBUI_BASE_URL is intentionally empty for the same-origin production app.
-// The browser SDK's encrypted transport needs an absolute Request URL though:
-// a relative relay URL would fail before EHBP can encrypt it.  Resolve every
-// local confidential endpoint against the active browser origin.
+// Resolve account-only Open WebUI endpoints against the active browser origin.
 const localEndpoint = (path: string) => {
 	const origin = typeof window === 'undefined' ? 'https://chat.adverserial.ai' : window.location.origin;
 	return new URL(`${WEBUI_BASE_URL}${path}`, origin).href;
@@ -168,30 +166,6 @@ const loadSdk = (): Promise<ConfidentialSdk> => {
 	return sdkLoad;
 };
 
-const relayFetch = (sessionToken: string): typeof fetch => {
-	return async (input: RequestInfo | URL, init?: RequestInit) => {
-		const request = input instanceof Request ? input : new Request(input, init);
-		const target = new URL(request.url);
-		if (!target.pathname.startsWith('/v1/')) return fetch(request);
-
-		const headers = new Headers(request.headers);
-		headers.set('x-openwebui-authorization', `Bearer ${sessionToken}`);
-
-		// The SDK creates a Request, whose body is exposed as a ReadableStream.
-		// Safari and some embedded browsers reject streamed request uploads. Buffer
-		// the already-encrypted EHBP payload before passing it to the same-origin
-		// relay; no plaintext is introduced at this boundary.
-		const body = request.body ? await request.arrayBuffer() : undefined;
-		return fetch(localEndpoint(`/api/v1/confidential/relay${target.pathname.slice('/v1'.length)}${target.search}`), {
-			method: request.method,
-			credentials: 'include',
-			cache: 'no-store',
-			headers,
-			body
-		});
-	};
-};
-
 const loadPolicy = async (config: ConfidentialConfig, modelId: string) => {
 	const response = await fetch(config.policy_url, {
 		credentials: 'omit',
@@ -243,7 +217,10 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 			expectedRuntimeDigest: typeof policy.runtime_image_digest === 'string' ? policy.runtime_image_digest : undefined,
 			attestationUrl: config.attestation_url,
 			verifyHardwareEvidence: sdk.createPhalaNVIDIAVerifier({ minimumGPUCount }),
-			fetchImpl: relayFetch(sessionToken)
+			// attest-proxy serves the browser CORS contract itself. Keep inference
+			// direct: the chat service receives the session for entitlement issuance,
+			// never an encrypted prompt envelope or completion stream.
+			fetchImpl: fetch
 		};
 		const client = await sdk.createVerifiedOpenAI(verificationOptions);
 		if (!client.verified || !client.proof) {
@@ -380,7 +357,7 @@ export const sendConfidentialCompletionStream = async (
 	}
 
 	// Streaming receipts are normally injected as the final SSE event. Keep the
-	// signed header as an equivalent transport fallback: some compliant relays
+	// signed header as an equivalent transport fallback: some compliant transport paths
 	// finalize the encrypted response before exposing the terminal SSE envelope.
 	// The signature is still checked against the entire raw stream below.
 	let receipt = response.headers.get('x-adverserial-receipt')?.trim() ?? '';

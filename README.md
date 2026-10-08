@@ -11,7 +11,7 @@ The active client:
 1. verifies the published model policy, TEE evidence, GPU evidence, and attested EHBP key in the browser;
 2. obtains a short-lived entitlement from billing without including the prompt;
 3. encrypts the prompt to the attested runtime;
-4. sends only ciphertext and the entitlement through the relay; and
+4. sends only ciphertext and the entitlement directly to the attested API; and
 5. verifies the signed inference receipt in the browser.
 
 The server does not receive an Open WebUI chat transcript through this path. Conversations are persisted only in the browser's IndexedDB database, `adverserial-confidential-chat`, scoped by account ID and local conversation ID. Selecting **Delete local conversation** removes that record.

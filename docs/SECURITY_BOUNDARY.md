@@ -2,7 +2,7 @@
 
 ## What never receives plaintext conversation text
 
-The browser-local confidential client does not call Open WebUI's standard chat APIs. The ASGI allow-list rejects them before request bodies are read. The only inference path is `/api/v1/confidential/relay/*`, which accepts an EHBP ciphertext envelope after browser-side runtime verification.
+The browser-local confidential client does not call Open WebUI's standard chat APIs. The ASGI allow-list rejects them before request bodies are read. The only inference path is the browser-direct EHBP endpoint at the attested API after browser-side runtime verification. The Open WebUI backend does not accept inference envelopes.
 
 The Open WebUI database is used for authentication/session state and model access. It does not receive confidential conversation records. The browser saves text-only conversation records in IndexedDB under `adverserial-confidential-chat`; this is the sole transcript store implemented by this distribution.
 

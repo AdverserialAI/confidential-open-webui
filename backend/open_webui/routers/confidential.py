@@ -1,23 +1,20 @@
 """Content-blind browser transport for confidential inference.
 
 The browser verifies the runtime and encrypts the request with EHBP before it
-reaches this router.  This service authenticates the Open WebUI session only
-to obtain a billing entitlement, then relays ciphertext and the entitlement to
-the configured confidential API.  It never accepts plaintext chat-completion
-payloads on this route and deliberately does not log request or response
-bodies.
+reaches the attested confidential API. This service authenticates the Open
+WebUI session only to obtain a billing entitlement; it never accepts
+chat-completion payloads.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from typing import AsyncIterator
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from open_webui.utils.auth import get_verified_user_by_token
@@ -26,20 +23,6 @@ router = APIRouter()
 
 _CANONICAL_MODEL = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}/[a-z0-9][a-z0-9._-]{0,127}$")
 _SHA256_FINGERPRINT = re.compile(r"^sha256:[A-Za-z0-9_-]{43}$")
-_FORWARDED_REQUEST_HEADERS = frozenset(
-    {
-        "accept",
-        "authorization",
-        "content-type",
-        "ehbp-encapsulated-key",
-        "x-adverserial-nonce",
-    }
-)
-_FORWARDED_RESPONSE_HEADERS = frozenset(
-    {"content-type", "ehbp-response-nonce", "x-adverserial-receipt", "content-length"}
-)
-
-
 def _https_url(name: str, default: str, *, required_path: str | None = None) -> str:
     value = os.getenv(name, default).strip()
     parsed = urlparse(value)
@@ -75,12 +58,11 @@ CONFIDENTIAL_RECEIPT_ISSUER = _https_url(
 )
 CONFIDENTIAL_RECEIPT_AUDIENCE = os.getenv("CONFIDENTIAL_RECEIPT_AUDIENCE", "https://chat.adverserial.ai").strip()
 CONFIDENTIAL_MAX_OUTPUT_TOKENS = int(os.getenv("CONFIDENTIAL_MAX_OUTPUT_TOKENS", "65536"))
-CONFIDENTIAL_MAX_CIPHERTEXT_BYTES = int(os.getenv("CONFIDENTIAL_MAX_CIPHERTEXT_BYTES", str(16 * 1024 * 1024)))
 CONFIDENTIAL_ALLOWED_MODELS = _models()
 
 if not CONFIDENTIAL_RECEIPT_AUDIENCE.startswith("https://"):
     raise RuntimeError("CONFIDENTIAL_RECEIPT_AUDIENCE must be an HTTPS audience")
-if CONFIDENTIAL_MAX_OUTPUT_TOKENS < 1 or CONFIDENTIAL_MAX_CIPHERTEXT_BYTES < 1:
+if CONFIDENTIAL_MAX_OUTPUT_TOKENS < 1:
     raise RuntimeError("confidential request limits must be positive")
 
 
@@ -123,16 +105,12 @@ def _bearer_token(value: str | None) -> str | None:
     return token or None
 
 
-def _session_token(request: Request, *, relay: bool = False) -> str | None:
-    # Relay requests reserve Authorization for the signed one-use entitlement.
-    # The Open WebUI session therefore travels in a separate, same-origin-only
-    # header.  The token is consumed locally and is never forwarded upstream.
-    header = "x-openwebui-authorization" if relay else "authorization"
-    return _bearer_token(request.headers.get(header)) or request.cookies.get("token")
+def _session_token(request: Request) -> str | None:
+    return _bearer_token(request.headers.get("authorization")) or request.cookies.get("token")
 
 
-async def _verified_session(request: Request, *, relay: bool = False):
-    token = _session_token(request, relay=relay)
+async def _verified_session(request: Request):
+    token = _session_token(request)
     if not token or token.startswith("sk-"):
         raise HTTPException(status_code=401, detail="Sign in with Open WebUI to use confidential inference.")
     user = await get_verified_user_by_token(token, getattr(request.app.state, "redis", None))
@@ -150,7 +128,7 @@ async def confidential_config(request: Request):
     """Expose public endpoint policy required by the browser SDK.
 
     This endpoint contains no credential, private key, or model prompt.  It is
-    session gated so deployments do not advertise a relay configuration to
+    session gated so deployments do not advertise the confidential endpoint configuration to
     anonymous callers.
     """
 
@@ -244,63 +222,3 @@ async def issue_entitlement(payload: EntitlementRequest, request: Request):
         return JSONResponse(status_code=response.status_code, content=response.json())
     except ValueError as exc:
         raise HTTPException(status_code=502, detail="Billing returned an invalid entitlement response.") from exc
-
-
-def _relay_headers(request: Request) -> dict[str, str]:
-    return {
-        name: value
-        for name, value in request.headers.items()
-        if name.lower() in _FORWARDED_REQUEST_HEADERS
-    }
-
-
-def _response_headers(headers: httpx.Headers) -> dict[str, str]:
-    result = {"cache-control": "no-store", "x-content-type-options": "nosniff"}
-    for name, value in headers.items():
-        if name.lower() in _FORWARDED_RESPONSE_HEADERS:
-            result[name] = value
-    return result
-
-
-async def _relay_stream(response: httpx.Response, client: httpx.AsyncClient) -> AsyncIterator[bytes]:
-    try:
-        async for chunk in response.aiter_raw():
-            yield chunk
-    finally:
-        await response.aclose()
-        await client.aclose()
-
-
-@router.post("/relay/chat/completions")
-async def relay_ciphertext(request: Request):
-    """Forward an EHBP envelope without accessing its encrypted content."""
-
-    await _verified_session(request, relay=True)
-    if not request.headers.get("ehbp-encapsulated-key"):
-        raise HTTPException(status_code=400, detail="Confidential relay requires an EHBP encrypted request.")
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            if int(content_length) > CONFIDENTIAL_MAX_CIPHERTEXT_BYTES:
-                raise HTTPException(status_code=413, detail="Encrypted request exceeds the confidential relay limit.")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Invalid encrypted request length.") from exc
-
-    client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=15.0), trust_env=False)
-    upstream_request = client.build_request(
-        "POST",
-        f"{CONFIDENTIAL_API_BASE_URL}/chat/completions",
-        headers=_relay_headers(request),
-        content=request.stream(),
-    )
-    try:
-        upstream = await client.send(upstream_request, stream=True)
-    except httpx.HTTPError as exc:
-        await client.aclose()
-        raise HTTPException(status_code=502, detail="Confidential endpoint is unavailable.") from exc
-
-    return StreamingResponse(
-        _relay_stream(upstream, client),
-        status_code=upstream.status_code,
-        headers=_response_headers(upstream.headers),
-    )
