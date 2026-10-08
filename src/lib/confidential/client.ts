@@ -332,7 +332,7 @@ export const sendConfidentialCompletion = async (
 };
 
 // The attested proxy supports OpenAI-compatible SSE.  It forwards every
-// upstream event and appends one `adversarial_receipt` event immediately before
+// upstream event and appends one `adverserial_receipt` event immediately before
 // the final [DONE].  That lets the UI render reasoning and answer deltas as
 // they arrive, then authenticate the *complete* stream before accepting it.
 //
@@ -407,8 +407,10 @@ export const sendConfidentialCompletionStream = async (
 		} catch {
 			return;
 		}
-		if (typeof event.adversarial_receipt === 'string') {
-			const streamedReceipt = event.adversarial_receipt.trim();
+		// The proxy event uses the Adverserial product spelling. This is part of
+		// the signed-stream wire contract, not a generic OpenAI event.
+		if (typeof event.adverserial_receipt === 'string') {
+			const streamedReceipt = event.adverserial_receipt.trim();
 			if (receipt && receipt !== streamedReceipt) {
 				throw new Error('The confidential runtime returned conflicting signed inference receipts.');
 			}

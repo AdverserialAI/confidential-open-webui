@@ -27,7 +27,7 @@ describe('confidential signed streaming', () => {
 			'data: {"choices":[{"delta":{"reasoning_content":"I will inspect the evidence. "}}]}\n\n',
 			'data: {"choices":[{"delta":{"content":"Verified answer"}}]}\n\n',
 			'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n',
-			'data: {"adversarial_receipt":"test-receipt"}\n\n',
+			'data: {"adverserial_receipt":"test-receipt"}\n\n',
 			'data: [DONE]\n\n'
 		];
 		const encoder = new TextEncoder();
