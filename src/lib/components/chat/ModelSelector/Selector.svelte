@@ -489,6 +489,11 @@
 	const selectItem = (item, index: number) => {
 		selectedModelIdx = index;
 
+		if (item?.value === 'lordx64/cyberkimi') {
+			toast.info('This model is not available now. It will be available soon.');
+			return;
+		}
+
 		if (values) {
 			if (compareEnabled) {
 				const nextValues = selectedValues.includes(item.value)

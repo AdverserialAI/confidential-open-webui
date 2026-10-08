@@ -2,8 +2,7 @@
 	import Fuse from 'fuse.js';
 	import Bolt from '$lib/components/icons/Bolt.svelte';
 	import { getContext } from 'svelte';
-	import { settings, WEBUI_NAME } from '$lib/stores';
-	import { WEBUI_VERSION } from '$lib/constants';
+	import { settings } from '$lib/stores';
 
 	const i18n = getContext('i18n');
 
@@ -76,10 +75,7 @@
 				? ' -mt-1'
 				: 'text-center items-center justify-center'}  self-start text-gray-600 dark:text-gray-400"
 		>
-			<!-- LICENSE covers this Open WebUI footer identifier.
-			Do not alter, remove, obscure, or replace it except as LICENSE permits:
-			https://docs.openwebui.com/license. -->
-			{$WEBUI_NAME} ‧ v{WEBUI_VERSION}
+			Built on Open WebUI
 		</div>
 	{/if}
 </div>
