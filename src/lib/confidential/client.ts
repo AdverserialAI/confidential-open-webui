@@ -57,6 +57,12 @@ export type ConfidentialRuntimeState =
 
 export const confidentialRuntime = writable<ConfidentialRuntimeState>({ status: 'idle' });
 
+export type ConfidentialStreamUpdate = {
+	content?: string;
+	reasoning?: string;
+	usage?: JsonRecord;
+};
+
 type Session = {
 	modelId: string;
 	config: ConfidentialConfig;
@@ -323,4 +329,136 @@ export const sendConfidentialCompletion = async (
 	});
 	const completion = JSON.parse(responseBody) as JsonRecord;
 	return { completion, receipt };
+};
+
+// The attested proxy supports OpenAI-compatible SSE.  It forwards every
+// upstream event and appends one `adversarial_receipt` event immediately before
+// the final [DONE].  That lets the UI render reasoning and answer deltas as
+// they arrive, then authenticate the *complete* stream before accepting it.
+//
+// The receipt covers the concatenation of raw SSE `data:` payloads (including
+// [DONE], excluding the injected receipt), matching attest-proxy's stream hash
+// contract.  Do not replace this parser with an event-source helper that loses
+// those raw payload boundaries: the client must reproduce the signed bytes.
+export const sendConfidentialCompletionStream = async (
+	session: Session,
+	sessionToken: string,
+	draft: JsonRecord,
+	onUpdate: (update: ConfidentialStreamUpdate) => void
+): Promise<{ receipt: string; usage?: JsonRecord }> => {
+	if (session.proof.expiresEpoch <= Date.now() / 1000) {
+		throw new Error('The verification proof expired. Verify the runtime again before sending a prompt.');
+	}
+
+	const nonce = base64UrlNonce();
+	const streamOptions = { include_usage: true };
+	const requested = JSON.stringify({
+		...draft,
+		stream: true,
+		stream_options: streamOptions,
+		max_tokens: session.config.max_output_tokens
+	});
+	const grant = await requestEntitlement(session, sessionToken, requested);
+	const body = JSON.stringify({
+		...draft,
+		stream: true,
+		stream_options: streamOptions,
+		max_tokens: grant.max_output_tokens
+	});
+	const response = await session.client.fetchWithEntitlement(grant.entitlement)(
+		`${session.config.api_base_url}/chat/completions`,
+		{
+			method: 'POST',
+			credentials: 'omit',
+			headers: { 'content-type': 'application/json', 'x-adverserial-nonce': nonce },
+			body
+		}
+	);
+	if (!response.ok) throw new Error(`Confidential API request failed (${response.status}).`);
+	if (!response.body || !response.headers.get('content-type')?.toLocaleLowerCase().includes('text/event-stream')) {
+		throw new Error('The confidential runtime did not return a signed streaming response.');
+	}
+
+	let receipt = '';
+	let sawDone = false;
+	let usage: JsonRecord | undefined;
+	let pending = '';
+	let rawPayloads = '';
+	const decoder = new TextDecoder();
+	const reader = response.body.getReader();
+
+	const handleData = (line: string) => {
+		const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
+		if (!normalized.startsWith('data:')) return;
+		const payload = normalized.slice(5).startsWith(' ') ? normalized.slice(6) : normalized.slice(5);
+		if (payload === '[DONE]') {
+			rawPayloads += payload;
+			sawDone = true;
+			return;
+		}
+
+		let event: JsonRecord;
+		try {
+			event = JSON.parse(payload) as JsonRecord;
+		} catch {
+			return;
+		}
+		if (typeof event.adversarial_receipt === 'string') {
+			receipt = event.adversarial_receipt;
+			return;
+		}
+
+		rawPayloads += payload;
+		if (isRecord(event.usage)) usage = event.usage;
+		const choices = Array.isArray(event.choices) ? event.choices : [];
+		const choice = isRecord(choices[0]) ? choices[0] : null;
+		const delta = choice && isRecord(choice.delta) ? choice.delta : null;
+		if (!delta) return;
+		const content = typeof delta.content === 'string' ? delta.content : undefined;
+		const reasoning =
+			typeof delta.reasoning_content === 'string'
+				? delta.reasoning_content
+				: typeof delta.reasoning === 'string'
+					? delta.reasoning
+					: typeof delta.thinking === 'string'
+						? delta.thinking
+						: undefined;
+		if (content || reasoning || usage) onUpdate({ content, reasoning, usage });
+	};
+
+	try {
+		while (true) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			pending += decoder.decode(value, { stream: true });
+			let newline;
+			while ((newline = pending.indexOf('\n')) >= 0) {
+				const line = pending.slice(0, newline);
+				pending = pending.slice(newline + 1);
+				handleData(line);
+			}
+		}
+		pending += decoder.decode();
+		if (pending) handleData(pending);
+	} finally {
+		reader.releaseLock();
+	}
+
+	if (!sawDone || !receipt) {
+		throw new Error('The confidential runtime stream ended without its signed inference receipt.');
+	}
+	const sdk = await loadSdk();
+	await sdk.verifyInferenceReceipt({
+		receipt,
+		trustedReceiptKeys: session.trustedReceiptKeys,
+		issuer: session.config.receipt_issuer,
+		audience: session.config.receipt_audience,
+		modelId: session.modelId,
+		requestNonce: nonce,
+		requestBody: body,
+		responseBody: rawPayloads,
+		tlsSpkiSha256: session.proof.tlsSpkiSha256,
+		attestationStateDigest: session.proof.attestationStateDigest
+	});
+	return { receipt, usage };
 };

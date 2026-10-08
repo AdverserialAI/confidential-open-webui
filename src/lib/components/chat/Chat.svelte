@@ -84,7 +84,7 @@
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import {
 		isConfidentialModel,
-		sendConfidentialCompletion,
+		sendConfidentialCompletionStream,
 		verifyConfidentialRuntime
 	} from '$lib/confidential/client';
 	import {
@@ -2810,43 +2810,69 @@
 			const directMessages = messages
 				.filter((message) => ['system', 'user', 'assistant'].includes(message?.role))
 				.map((message) => ({ role: message.role, content: message.content ?? '' }));
-			const { completion } = await sendConfidentialCompletion(session, localStorage.token, {
-				model: model.id,
-				messages: directMessages
-			});
-			const choice = Array.isArray(completion.choices) ? completion.choices[0] : null;
-			const assistantMessage = choice?.message ?? {};
-			let content = assistantMessage?.content;
-			let reasoning =
-				typeof assistantMessage?.reasoning_content === 'string'
-					? assistantMessage.reasoning_content
-					: typeof assistantMessage?.reasoning === 'string'
-						? assistantMessage.reasoning
-						: typeof assistantMessage?.thinking === 'string'
-							? assistantMessage.thinking
-							: '';
-			if (typeof content !== 'string') {
-				throw new Error('The confidential runtime returned no assistant message.');
-			}
-
-			// Normal Open WebUI inference turns provider reasoning into structured
-			// output. The confidential client bypasses that plaintext pipeline, so
-			// preserve the same UI contract after the decrypted response and signed
-			// receipt have both been verified in the browser.
-			if (!reasoning) {
-				const thought = content.match(/<think>([\s\S]*?)<\/think>\s*/i);
-				if (thought) {
-					reasoning = thought[1].trim();
-					content = content.replace(thought[0], '').trim();
+			let content = '';
+			let reasoning = '';
+			let thoughtBuffer = '';
+			let insideThought = false;
+			const applyOutput = (status: 'in_progress' | 'completed') => {
+				responseMessage.content = content;
+				responseMessage.output = [
+					...(reasoning
+						? [{ type: 'reasoning', status, content: [{ type: 'output_text', text: reasoning }] }]
+						: []),
+					{ type: 'message', status, content: [{ type: 'output_text', text: content }] }
+				];
+				history.messages[responseMessageId] = responseMessage;
+				history = history;
+				if (shouldAutoScrollResponse()) scrollToBottom();
+			};
+			const appendVisible = (value: string) => {
+				if (insideThought) reasoning += value;
+				else content += value;
+			};
+			const appendTaggedContent = (value: string, flush = false) => {
+				thoughtBuffer += value;
+				while (thoughtBuffer) {
+					const marker = insideThought ? '</think>' : '<think>';
+					const lower = thoughtBuffer.toLocaleLowerCase();
+					const markerIndex = lower.indexOf(marker);
+					if (markerIndex >= 0) {
+						appendVisible(thoughtBuffer.slice(0, markerIndex));
+						thoughtBuffer = thoughtBuffer.slice(markerIndex + marker.length);
+						insideThought = !insideThought;
+						continue;
+					}
+					if (flush) {
+						appendVisible(thoughtBuffer);
+						thoughtBuffer = '';
+						return;
+					}
+					let trailingPrefix = 0;
+					for (let size = Math.min(marker.length - 1, thoughtBuffer.length); size > 0; size -= 1) {
+						if (marker.startsWith(lower.slice(-size))) {
+							trailingPrefix = size;
+							break;
+						}
+					}
+					appendVisible(thoughtBuffer.slice(0, thoughtBuffer.length - trailingPrefix));
+					thoughtBuffer = thoughtBuffer.slice(thoughtBuffer.length - trailingPrefix);
+					return;
 				}
-			}
-			responseMessage.content = content;
-			responseMessage.output = [
-				...(reasoning
-					? [{ type: 'reasoning', status: 'completed', content: [{ type: 'output_text', text: reasoning }] }]
-					: []),
-				{ type: 'message', status: 'completed', content: [{ type: 'output_text', text: content }] }
-			];
+			};
+
+			await sendConfidentialCompletionStream(
+				session,
+				localStorage.token,
+				{ model: model.id, messages: directMessages },
+				(update) => {
+					if (update.reasoning) reasoning += update.reasoning;
+					if (update.content) appendTaggedContent(update.content);
+					applyOutput('in_progress');
+				}
+			);
+			appendTaggedContent('', true);
+			if (!content && !reasoning) throw new Error('The confidential runtime returned no assistant message.');
+			applyOutput('completed');
 			responseMessage.done = true;
 			responseMessage.info = {
 				...(responseMessage.info ?? {}),
