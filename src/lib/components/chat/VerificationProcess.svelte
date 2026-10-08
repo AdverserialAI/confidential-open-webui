@@ -59,11 +59,11 @@
 						</div>
 						<div class="map-card map-card--verify">
 							<div class="map-card__title"><DocumentCheck className="size-3.5 text-[#a1c4b3]" strokeWidth="1.8" /> Adverserial Verify</div>
-							<ul><li>Signs the verification receipt</li><li>Publishes the expected policy</li></ul>
+							<ul><li>Publishes the expected policy</li><li>Links released source and provenance</li></ul>
 						</div>
 						<div class="map-card map-card--runtime">
 							<div class="map-card__title"><LockClosed className="size-3.5 text-[#a1c4b3]" strokeWidth="1.8" /> Configured runtime</div>
-							<p>Must return fresh hardware evidence bound to the selected model and runtime policy.</p>
+							<p>Returns fresh hardware evidence and the receipt the browser verifies for the selected policy.</p>
 						</div>
 						<span class="map-line map-line--one" aria-hidden="true"></span><span class="map-line map-line--two" aria-hidden="true"></span><span class="map-line map-line--three" aria-hidden="true"></span>
 					</div>

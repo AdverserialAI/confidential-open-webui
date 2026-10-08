@@ -210,8 +210,11 @@
 		if (normalized.length === 0 && defaultModels.length > 0) {
 			normalized = defaultModels.filter((modelId) => availableModels.includes(modelId));
 		}
+		// Confidential chat deliberately starts without a selected model. This keeps
+		// the first screen honest: a request cannot leave the browser until the user
+		// has explicitly selected a published confidential endpoint.
 		if (normalized.length === 0) {
-			normalized = availableModels.length > 0 ? [availableModels[0]] : [''];
+			normalized = [''];
 		}
 
 		return normalized;
@@ -227,10 +230,9 @@
 			!selectedModels?.some((modelId) => modelId) &&
 			!modelSearchParam
 		) {
-			const fallbackModels = normalizeSelectedModels(selectedModels);
-			if (!equal(fallbackModels, selectedModels)) {
-				selectedModels = fallbackModels;
-			}
+			// Do not auto-select a model on a new confidential chat. Selection is an
+			// explicit user decision, and it determines the policy that is verified.
+			selectedModels = [''];
 		}
 	}
 
@@ -2209,23 +2211,10 @@
 			selectedModels = selectedModels.filter((modelId) => availableModels.includes(modelId));
 		}
 
-		// Ensure at least one model is selected
+		// A new confidential chat never chooses a fallback endpoint on the user's
+		// behalf. A URL-selected model remains valid; otherwise the chooser stays empty.
 		if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
-			if (availableModels.length > 0) {
-				if (defaultModels && defaultModels.length > 0) {
-					selectedModels = defaultModels.filter((modelId) => availableModels.includes(modelId));
-				}
-
-				if (
-					selectedModels.length === 0 ||
-					(selectedModels.length === 1 && selectedModels[0] === '')
-				) {
-					// Only fall back to first available model if default models didn't resolve
-					selectedModels = [availableModels?.at(0) ?? ''];
-				}
-			} else {
-				selectedModels = [''];
-			}
+			selectedModels = [''];
 		}
 
 		if ($mobile) {
@@ -3257,6 +3246,29 @@
 
 		if (!equal(selectedModels, _selectedModels)) {
 			selectedModels = _selectedModels;
+		}
+
+		const confidentialSelection = _selectedModels
+			.filter(Boolean)
+			.map((modelId) => $models.find((model) => model.id === modelId))
+			.filter(Boolean);
+
+		// This public fork has one egress path for prompts: the attested confidential
+		// transport. Keep the check here as a defence in depth layer even though the
+		// layout only exposes confidential models.
+		if (
+			_selectedModels.length !== 1 ||
+			!_selectedModels[0] ||
+			confidentialSelection.length !== 1 ||
+			!isConfidentialModel(confidentialSelection[0])
+		) {
+			toast.error('Select one confidential model before sending a message.');
+			return;
+		}
+
+		if (files.length > 0 || chatFiles.length > 0) {
+			toast.error('Attachments are disabled in browser-only confidential chat.');
+			return;
 		}
 
 		if (String(userPrompt).trim() === '/compact') {
@@ -4694,6 +4706,7 @@
 									class=" pb-2 {dragged ? 'z-0' : 'z-10'}"
 								>
 									<MessageInput
+										confidentialOnly={true}
 										bind:this={messageInput}
 										{history}
 										{taskIds}
@@ -4786,6 +4799,7 @@
 								{/if}
 								<div id={embedded ? messageInputDropzoneId : undefined} class="pb-2 z-10">
 									<MessageInput
+										confidentialOnly={true}
 										bind:this={messageInput}
 										{history}
 										{taskIds}

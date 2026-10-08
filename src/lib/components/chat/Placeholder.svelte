@@ -42,6 +42,7 @@
 
 	export let prompt = '';
 	export let files = [];
+	export let confidentialOnly = false;
 	export let messageInput = null;
 
 	export let selectedToolIds = [];
@@ -233,6 +234,7 @@
 					<MessageInput
 						bind:this={messageInput}
 						{history}
+						{confidentialOnly}
 						bind:selectedModels
 						bind:files
 						bind:prompt

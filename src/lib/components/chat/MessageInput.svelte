@@ -139,6 +139,9 @@
 	export let contextUsage = null;
 	export let contextCompactionEnabled = false;
 	export let embedded = false;
+	// The public Adverserial fork keeps the familiar Open WebUI composer but
+	// disables upload routes: only text can enter the confidential transport.
+	export let confidentialOnly = false;
 
 	export let autoScroll = false;
 	export let generating = false;
@@ -902,6 +905,11 @@
 	};
 
 	const uploadFileHandler = async (file, process = true, itemData = {}) => {
+		if (confidentialOnly) {
+			toast.error('Attachments are disabled in browser-only confidential chat.');
+			return null;
+		}
+
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
 			return null;

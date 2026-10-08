@@ -98,7 +98,7 @@
 				<div>
 					<p class="text-[0.625rem] font-medium tracking-[0.15em] text-[#b9d5c8]">ADVERSERIAL AI · CONFIDENTIAL RUNTIME</p>
 					<h2 id="verification-center-title" class="mt-2 text-xl font-semibold tracking-tight text-white">Verification Center</h2>
-					<p class="mt-1 text-xs text-[#a7b1c0]">Evidence is verified in your browser.</p>
+					<p class="mt-1 text-xs text-[#a7b1c0]">Powered by Adverserial Verify · checked in your browser.</p>
 				</div>
 				<button type="button" class="flex size-8 shrink-0 items-center justify-center rounded-md text-lg text-[#a7b1c0] transition hover:bg-white/[0.06] hover:text-white" on:click={() => (open = false)} aria-label="Close Verification Center">×</button>
 			</header>
