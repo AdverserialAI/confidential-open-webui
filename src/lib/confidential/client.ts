@@ -379,7 +379,11 @@ export const sendConfidentialCompletionStream = async (
 		throw new Error('The confidential runtime did not return a signed streaming response.');
 	}
 
-	let receipt = '';
+	// Streaming receipts are normally injected as the final SSE event. Keep the
+	// signed header as an equivalent transport fallback: some compliant relays
+	// finalize the encrypted response before exposing the terminal SSE envelope.
+	// The signature is still checked against the entire raw stream below.
+	let receipt = response.headers.get('x-adverserial-receipt')?.trim() ?? '';
 	let sawDone = false;
 	let usage: JsonRecord | undefined;
 	let pending = '';
@@ -404,7 +408,11 @@ export const sendConfidentialCompletionStream = async (
 			return;
 		}
 		if (typeof event.adversarial_receipt === 'string') {
-			receipt = event.adversarial_receipt;
+			const streamedReceipt = event.adversarial_receipt.trim();
+			if (receipt && receipt !== streamedReceipt) {
+				throw new Error('The confidential runtime returned conflicting signed inference receipts.');
+			}
+			receipt = streamedReceipt;
 			return;
 		}
 
