@@ -16,6 +16,8 @@ The active client:
 
 The server does not receive an Open WebUI chat transcript through this path. Conversations are persisted only in the browser's IndexedDB database, `adverserial-confidential-chat`, scoped by account ID and local conversation ID. Selecting **Delete local conversation** removes that record.
 
+**Temporary Chat** keeps a conversation in memory for the current tab only: it never creates or updates an IndexedDB transcript. Turn Temporary Chat off, or choose **Save locally**, to persist the current conversation in that same browser-only IndexedDB store. Neither action sends the transcript to the Open WebUI database.
+
 ## Verification UI
 
 The familiar Open WebUI composer includes **Verification preview** beside the model selector. It opens an explanation of the browser-side proof sequence: policy and release provenance, a fresh nonce-bound hardware receipt, signature/freshness checks, and the recipient-key binding. The persistent **VERIFY** control opens the right-side **Verification Center**. Its Runtime, Data is encrypted, and Code is auditable modules show `Pending` until the browser has validated current evidence; the interface never treats an unavailable or failed proof as verified.

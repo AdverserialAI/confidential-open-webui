@@ -166,7 +166,7 @@
 
 					{#if $user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) && !($user?.permissions?.chat?.temporary_enforced ?? false) : true}
 						{#if !chat?.id}
-							<Tooltip content={$i18n.t(`Temporary Chat`)}>
+							<Tooltip content={$i18n.t($temporaryChatEnabled ? `Turn off Temporary Chat` : `Temporary Chat`)}>
 								<button
 									class="flex size-6 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
 									id="temporary-chat-button"
@@ -189,7 +189,7 @@
 											window.history.replaceState(null, '', location.pathname);
 										}
 									}}
-									aria-label={$i18n.t(`Temporary Chat`)}
+									aria-label={$i18n.t($temporaryChatEnabled ? `Turn off Temporary Chat` : `Temporary Chat`)}
 								>
 									{#if $temporaryChatEnabled}
 										<ChatBubbleDottedChecked className="size-4.5" strokeWidth="1.5" />
@@ -199,14 +199,14 @@
 								</button>
 							</Tooltip>
 						{:else if $temporaryChatEnabled}
-							<Tooltip content={$i18n.t(`Save Chat`)}>
+							<Tooltip content={$i18n.t(`Save locally`)}>
 								<button
 									class="flex size-6 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
 									id="save-temporary-chat-button"
 									on:click={async () => {
 										onSaveTempChat();
 									}}
-									aria-label={$i18n.t(`Save Chat`)}
+									aria-label={$i18n.t(`Save locally`)}
 								>
 									<ChatCheck className="size-4.5" strokeWidth="1.5" />
 								</button>

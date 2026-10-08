@@ -426,6 +426,7 @@
 	let confidentialEphemeral = false;
 	let confidentialConversationId: string | null = null;
 	let confidentialRestoredConversationId: string | null = null;
+	let savingTemporaryTranscript = false;
 
 	const localConfidentialConversationFromUrl = () => {
 		if (typeof window === 'undefined') return null;
@@ -444,7 +445,24 @@
 		window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
 	};
 
+	const clearTemporaryChatUrlMarker = () => {
+		if (typeof window === 'undefined') return;
+		const url = new URL(window.location.href);
+		url.searchParams.delete('temporary-chat');
+		window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+	};
+
+	const isTemporaryLocalSession = () =>
+		Boolean($temporaryChatEnabled) ||
+		isTemporaryChatId($chatId) ||
+		(typeof window !== 'undefined' && new URL(window.location.href).searchParams.has('temporary-chat'));
+
 	const persistConfidentialTranscript = async (modelId: string) => {
+		// Temporary mode is memory-only. Use the store, temporary chat ID, and URL
+		// marker together because Open WebUI updates those independently during a send.
+		// Never create or update an IndexedDB record for a temporary session.
+		if (isTemporaryLocalSession()) return false;
+
 		const ownerId = $user?.id;
 		if (!ownerId) throw new Error('Sign in is required before saving a local confidential transcript.');
 		if (!confidentialConversationId) {
@@ -457,6 +475,16 @@
 			modelId,
 			history
 		});
+		return true;
+	};
+
+	const detachLocalConfidentialTranscript = () => {
+		// Do not delete a previous saved transcript when starting a temporary chat.
+		// It belongs to the earlier non-temporary session; just ensure the new session
+		// has no local-record identity or URL reference.
+		confidentialConversationId = null;
+		confidentialRestoredConversationId = null;
+		updateLocalConfidentialConversationUrl(null);
 	};
 
 	const restoreConfidentialTranscript = async () => {
@@ -473,6 +501,8 @@
 			history = saved.history;
 			selectedModels = [saved.modelId];
 			confidentialConversationId = saved.conversationId;
+			// Local-history links always reopen in persistent browser mode.
+			await temporaryChatEnabled.set(false);
 			confidentialEphemeral = true;
 			await chatId.set('');
 			await chatTitle.set('Confidential local chat');
@@ -508,6 +538,7 @@
 
 	$: if (
 		!loading &&
+		!$temporaryChatEnabled &&
 		!chatIdProp &&
 		!$chatId &&
 		$user?.id &&
@@ -1672,6 +1703,36 @@
 			});
 		}
 
+		let temporaryModeInitialized = false;
+		let temporaryModeWasEnabled = false;
+		const temporaryModeSubscribe = temporaryChatEnabled.subscribe((value) => {
+			const enabled = value === true;
+			if (!temporaryModeInitialized) {
+				temporaryModeInitialized = true;
+				temporaryModeWasEnabled = enabled;
+				return;
+			}
+			if (enabled === temporaryModeWasEnabled) return;
+			temporaryModeWasEnabled = enabled;
+
+			if (enabled) {
+				detachLocalConfidentialTranscript();
+				return;
+			}
+
+			const modelId = selectedModels.find((id) => Boolean(id));
+			if (!savingTemporaryTranscript && modelId && Object.keys(history.messages ?? {}).length > 0) {
+				void persistConfidentialTranscript(modelId)
+					.then((saved) => {
+						if (saved) toast.success('Conversation is now stored only in this browser.');
+					})
+					.catch((error) => {
+						console.error('[confidential local transcript]', error);
+						toast.error('The conversation could not be saved in this browser.');
+					});
+			}
+		});
+
 		const pageSubscribe = page.subscribe(async (p) => {
 			if (p.url.pathname === '/' || p.url.pathname.startsWith('/folders/')) {
 				await tick();
@@ -1734,6 +1795,7 @@
 				if (chatIdProp && !$temporaryChatEnabled) {
 					updateLastReadAt(chatIdProp);
 				}
+				temporaryModeSubscribe();
 				pageSubscribe();
 				showControlsSubscribe();
 				selectedFolderSubscribe();
@@ -4608,41 +4670,33 @@
 							{deleteChatHandler}
 							{moveChatHandler}
 							onSaveTempChat={async () => {
+								if (!history?.currentId || !Object.keys(history.messages).length) {
+									toast.error($i18n.t('No conversation to save'));
+									return;
+								}
+
+								const modelId = selectedModels.find((id) => Boolean(id));
+								if (!modelId) {
+									toast.error($i18n.t('Model not selected'));
+									return;
+								}
+
+								savingTemporaryTranscript = true;
 								try {
-									if (!history?.currentId || !Object.keys(history.messages).length) {
-										toast.error($i18n.t('No conversation to save'));
-										return;
-									}
-									const messages = createMessagesList(history, history.currentId);
-									const title =
-										messages.find((m) => m.role === 'user')?.content ?? $i18n.t('New Chat');
-
-									const savedChat = await createNewChat(
-										localStorage.token,
-										{
-											id: uuidv4(),
-											title: title.length > 50 ? `${title.slice(0, 50)}...` : title,
-											models: selectedModels,
-											params: params,
-											history: history,
-											messages: messages,
-											timestamp: Date.now()
-										},
-										null,
-										chatVariables
-									);
-
-									if (savedChat) {
-										temporaryChatEnabled.set(false);
-										chatId.set(savedChat.id);
-										await refreshChatList(localStorage.token);
-
-										await goto(`/c/${savedChat.id}`);
-										toast.success($i18n.t('Conversation saved successfully'));
-									}
+									await temporaryChatEnabled.set(false);
+									// A temporary Open WebUI chat uses a synthetic ID. Clear it before
+									// persisting so this explicit user action is the only exit from
+									// memory-only mode.
+									await chatId.set('');
+									await chatTitle.set('Confidential local chat');
+									clearTemporaryChatUrlMarker();
+									const saved = await persistConfidentialTranscript(modelId);
+									if (saved) toast.success('Conversation saved only in this browser.');
 								} catch (error) {
-									console.error('Failed to save temporary chat:', error);
-									toast.error($i18n.t('Failed to save conversation'));
+									console.error('[confidential local transcript]', error);
+									toast.error('The conversation could not be saved in this browser.');
+								} finally {
+									savingTemporaryTranscript = false;
 								}
 							}}
 						/>
