@@ -170,14 +170,19 @@ const relayFetch = (sessionToken: string): typeof fetch => {
 
 		const headers = new Headers(request.headers);
 		headers.set('x-openwebui-authorization', `Bearer ${sessionToken}`);
+
+		// The SDK creates a Request, whose body is exposed as a ReadableStream.
+		// Safari and some embedded browsers reject streamed request uploads. Buffer
+		// the already-encrypted EHBP payload before passing it to the same-origin
+		// relay; no plaintext is introduced at this boundary.
+		const body = request.body ? await request.arrayBuffer() : undefined;
 		return fetch(localEndpoint(`/api/v1/confidential/relay${target.pathname.slice('/v1'.length)}${target.search}`), {
 			method: request.method,
 			credentials: 'include',
 			cache: 'no-store',
 			headers,
-			body: request.body,
-			duplex: request.body ? 'half' : undefined
-		} as RequestInit);
+			body
+		});
 	};
 };
 
