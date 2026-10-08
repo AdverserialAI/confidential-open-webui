@@ -12,6 +12,7 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import Note from '$lib/components/icons/Note.svelte';
+	import Calendar from '$lib/components/icons/Calendar.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
 	import SignOut from '$lib/components/icons/SignOut.svelte';
 
@@ -184,6 +185,7 @@
 				{/if}
 				<a class="account-action" href="/billing">Billing &amp; membership</a>
 				<a class="account-action" href="/notes"><Note className="size-5" /> Notes</a>
+				<a class="account-action" href="/calendar"><Calendar className="size-5" /> Calendar</a>
 				<a class="account-action" href="/settings"><Cog6 className="size-5" /> Settings</a>
 				<button class="account-action signout" on:click={signOut}><SignOut className="size-5" /> Sign Out</button>
 			</div>
