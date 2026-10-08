@@ -142,3 +142,23 @@ export const deleteLocalConfidentialConversation = async (ownerId: string, conve
 		database.close();
 	}
 };
+
+export const listLocalConfidentialConversations = async (
+	ownerId: string
+): Promise<LocalConfidentialConversation[]> => {
+	const database = await openDatabase();
+	try {
+		const transaction = database.transaction(STORE_NAME, 'readonly');
+		const records = await new Promise<LocalConfidentialConversation[]>((resolve, reject) => {
+			const request = transaction.objectStore(STORE_NAME).getAll();
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve((request.result as LocalConfidentialConversation[]) ?? []);
+		});
+		return records
+			.filter((record) => record?.ownerId === ownerId)
+			.map((record) => ({ ...record, history: copyHistory(record.history) }))
+			.sort((left, right) => right.updatedAt - left.updatedAt);
+	} finally {
+		database.close();
+	}
+};

@@ -89,6 +89,15 @@ const endpointOrigin = (value: string) => {
 	return url.origin;
 };
 
+// WEBUI_BASE_URL is intentionally empty for the same-origin production app.
+// The browser SDK's encrypted transport needs an absolute Request URL though:
+// a relative relay URL would fail before EHBP can encrypt it.  Resolve every
+// local confidential endpoint against the active browser origin.
+const localEndpoint = (path: string) => {
+	const origin = typeof window === 'undefined' ? 'https://chat.adverserial.ai' : window.location.origin;
+	return new URL(`${WEBUI_BASE_URL}${path}`, origin).href;
+};
+
 const base64UrlNonce = () => {
 	const bytes = crypto.getRandomValues(new Uint8Array(32));
 	let output = '';
@@ -100,7 +109,7 @@ const canonicalModelId = (value: unknown): value is string =>
 	typeof value === 'string' && /^[a-z0-9][a-z0-9._-]{0,127}\/[a-z0-9][a-z0-9._-]{0,127}$/.test(value);
 
 const fetchConfig = async (sessionToken: string): Promise<ConfidentialConfig> => {
-	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/confidential/config`, {
+	const response = await fetch(localEndpoint('/api/v1/confidential/config'), {
 		credentials: 'include',
 		cache: 'no-store',
 		headers: { authorization: `Bearer ${sessionToken}`, accept: 'application/json' }
@@ -161,7 +170,7 @@ const relayFetch = (sessionToken: string): typeof fetch => {
 
 		const headers = new Headers(request.headers);
 		headers.set('x-openwebui-authorization', `Bearer ${sessionToken}`);
-		return fetch(`${WEBUI_BASE_URL}/api/v1/confidential/relay${target.pathname.slice('/v1'.length)}${target.search}`, {
+		return fetch(localEndpoint(`/api/v1/confidential/relay${target.pathname.slice('/v1'.length)}${target.search}`), {
 			method: request.method,
 			credentials: 'include',
 			cache: 'no-store',
@@ -244,7 +253,7 @@ const requestEntitlement = async (
 	sessionToken: string,
 	requestBody: string
 ): Promise<{ entitlement: string; max_output_tokens: number }> => {
-	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/confidential/entitlements`, {
+	const response = await fetch(localEndpoint('/api/v1/confidential/entitlements'), {
 		method: 'POST',
 		credentials: 'include',
 		headers: {

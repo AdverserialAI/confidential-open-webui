@@ -4,6 +4,7 @@
 	import { models, user } from '$lib/stores';
 	import { isConfidentialModel } from '$lib/confidential/client';
 	import VerificationCenter from '$lib/components/chat/VerificationCenter.svelte';
+	import ConfidentialSidebar from '$lib/components/layout/ConfidentialSidebar.svelte';
 	import VerificationProcess from '$lib/components/chat/VerificationProcess.svelte';
 
 	let modelsLoadedFor = '';
@@ -28,7 +29,8 @@
 </script>
 
 <div class="app relative">
-	<main id="main-content" class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+	<ConfidentialSidebar />
+	<main id="main-content" class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 md:ml-[17.5rem]">
 		<slot />
 	</main>
 	<VerificationProcess />

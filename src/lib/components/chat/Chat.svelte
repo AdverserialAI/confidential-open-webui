@@ -475,6 +475,7 @@
 			modelId,
 			history
 		});
+		window.dispatchEvent(new Event('adverserial:local-confidential-history-changed'));
 		return true;
 	};
 
@@ -520,6 +521,7 @@
 		if (ownerId && conversationId) {
 			try {
 				await deleteLocalConfidentialConversation(ownerId, conversationId);
+				window.dispatchEvent(new Event('adverserial:local-confidential-history-changed'));
 			} catch (error) {
 				console.error('[confidential local transcript]', error);
 				toast.error('The local confidential transcript could not be deleted.');
