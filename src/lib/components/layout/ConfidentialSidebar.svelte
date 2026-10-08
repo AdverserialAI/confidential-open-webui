@@ -16,6 +16,24 @@
 	let conversations: LocalConfidentialConversation[] = [];
 	let accountOpen = false;
 	let mobileOpen = false;
+	type MembershipStatus = {
+		member: boolean;
+		plan?: string;
+		display_name?: string;
+		credit_day_used?: number;
+		credit_day_cap?: number;
+		credit_week_used?: number;
+		credit_week_cap?: number;
+		output_day_used?: number;
+		output_day_cap?: number;
+		output_week_used?: number;
+		output_week_cap?: number;
+		daily_reset_at?: string;
+		weekly_reset_at?: string;
+		overage_enabled?: boolean;
+	};
+	let membership: MembershipStatus | null = null;
+	let membershipLoading = false;
 
 	const titleFor = (conversation: LocalConfidentialConversation) => {
 		const firstUser = Object.values(conversation.history.messages ?? {}).find(
@@ -27,6 +45,7 @@
 	const reload = async () => {
 		if (!$user?.id) {
 			conversations = [];
+			membership = null;
 			return;
 		}
 		try {
@@ -34,6 +53,36 @@
 		} catch {
 			conversations = [];
 		}
+	};
+
+	const loadMembership = async () => {
+		const token = localStorage.getItem('token');
+		if (!$user?.id || !token) {
+			membership = null;
+			return;
+		}
+		membershipLoading = true;
+		try {
+			const response = await fetch('/api/v1/confidential/account', {
+				credentials: 'include',
+				cache: 'no-store',
+				headers: { authorization: `Bearer ${token}`, accept: 'application/json' }
+			});
+			membership = response.ok ? ((await response.json()) as MembershipStatus) : null;
+		} catch {
+			membership = null;
+		} finally {
+			membershipLoading = false;
+		}
+	};
+
+	const usagePercent = (used?: number, cap?: number) =>
+		used !== undefined && cap && cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+	const credit = (value?: number) => `${Math.max(0, value ?? 0).toFixed(2)} credits`;
+	const tokens = (value?: number) => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(Math.max(0, value ?? 0));
+	const toggleAccount = () => {
+		accountOpen = !accountOpen;
+		if (accountOpen) void loadMembership();
 	};
 
 	const newConversation = () => {
@@ -60,10 +109,14 @@
 	const handleChange = () => void reload();
 	onMount(() => {
 		void reload();
+		void loadMembership();
 		window.addEventListener('adverserial:local-confidential-history-changed', handleChange);
 		return () => window.removeEventListener('adverserial:local-confidential-history-changed', handleChange);
 	});
-	$: if ($user?.id) void reload();
+	$: if ($user?.id) {
+		void reload();
+		void loadMembership();
+	}
 </script>
 
 <button class="mobile-nav" on:click={() => (mobileOpen = true)} aria-label="Open local chat history">
@@ -97,7 +150,7 @@
 
 	<div class="sidebar-footer">
 		<a class="membership" href="/billing"><span>Membership &amp; billing</span><span aria-hidden="true">↗</span></a>
-		<button class="account" on:click={() => (accountOpen = !accountOpen)} aria-expanded={accountOpen}>
+		<button class="account" on:click={toggleAccount} aria-expanded={accountOpen}>
 			<UserCircle className="size-7" />
 			<span><strong>{$user?.name || 'Your profile'}</strong><small>{$user?.email || 'Signed-in account'}</small></span>
 			<span aria-hidden="true">···</span>
@@ -105,6 +158,21 @@
 		{#if accountOpen}
 			<div class="account-menu">
 				<div><strong>{$user?.name || 'Account'}</strong><small>Identity is used only for access and entitlements.</small></div>
+				{#if membershipLoading}
+					<p class="usage-state">Loading membership status…</p>
+				{:else if membership?.member}
+					<section class="usage-card" aria-label="Membership usage">
+						<div class="usage-heading"><span>{membership.display_name}</span><span>{membership.overage_enabled ? 'Paid usage on' : 'Included usage'}</span></div>
+						<div class="remaining"><strong>{credit((membership.credit_week_cap ?? 0) - (membership.credit_week_used ?? 0))}</strong><span>weekly credit remaining</span></div>
+						<div class="usage-row"><div><span>Daily credits</span><b>{credit(membership.credit_day_used)} / {credit(membership.credit_day_cap)}</b></div><i><em style={`width:${usagePercent(membership.credit_day_used, membership.credit_day_cap)}%`}></em></i></div>
+						<div class="usage-row"><div><span>Weekly credits</span><b>{credit(membership.credit_week_used)} / {credit(membership.credit_week_cap)}</b></div><i><em style={`width:${usagePercent(membership.credit_week_used, membership.credit_week_cap)}%`}></em></i></div>
+						<div class="usage-row"><div><span>Output today</span><b>{tokens(membership.output_day_used)} / {tokens(membership.output_day_cap)}</b></div><i><em style={`width:${usagePercent(membership.output_day_used, membership.output_day_cap)}%`}></em></i></div>
+						<div class="usage-row"><div><span>Output this week</span><b>{tokens(membership.output_week_used)} / {tokens(membership.output_week_cap)}</b></div><i><em style={`width:${usagePercent(membership.output_week_used, membership.output_week_cap)}%`}></em></i></div>
+						<div class="usage-reset"><span>Daily reset {membership.daily_reset_at ? new Date(membership.daily_reset_at).toLocaleString() : '—'}</span><span>Weekly reset {membership.weekly_reset_at ? new Date(membership.weekly_reset_at).toLocaleString() : '—'}</span></div>
+					</section>
+				{:else}
+					<p class="usage-state">No active membership. Usage is billed from your wallet.</p>
+				{/if}
 				<a href="/billing">Manage membership</a>
 				<button on:click={signOut}>Sign out</button>
 			</div>
@@ -123,6 +191,6 @@
 	.browser-notice { display:flex; align-items:center; gap:.4rem; margin:.8rem .25rem 0; color:rgb(94 234 212); font-size:.68rem; }
 	.history { min-height:0; flex:1; overflow-y:auto; margin-top:1.25rem; padding:.1rem .15rem; } .history-label { margin:0 .3rem .55rem; color:rgb(148 163 184); font-size:.67rem; letter-spacing:.12em; text-transform:uppercase; } .empty { margin:.2rem .3rem; color:rgb(148 163 184); font-size:.75rem; line-height:1.35; } .conversation { display:block; width:100%; overflow:hidden; border:0; border-radius:.45rem; background:transparent; color:rgb(209 213 219); padding:.55rem .6rem; text-align:left; text-overflow:ellipsis; white-space:nowrap; font-size:.8rem; } .conversation:hover { background:rgb(31 41 55); color:#fff; }
 	.sidebar-footer { position:relative; display:grid; gap:.5rem; border-top:1px solid rgb(55 65 81 / .72); padding-top:.8rem; } .membership,.account { display:flex; align-items:center; gap:.55rem; width:100%; border:0; border-radius:.55rem; background:transparent; color:rgb(229 231 235); padding:.55rem; font-size:.8rem; text-align:left; } .membership { justify-content:space-between; color:rgb(153 246 228); text-decoration:none; } .membership:hover,.account:hover { background:rgb(31 41 55); } .account span:nth-child(2) { display:grid; min-width:0; flex:1; gap:.1rem; } .account strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.78rem; } .account small { overflow:hidden; color:rgb(148 163 184); font-size:.67rem; text-overflow:ellipsis; white-space:nowrap; }
-	.account-menu { position:absolute; bottom:calc(100% + .35rem); left:0; right:0; display:grid; gap:.55rem; border:1px solid rgb(71 85 105); border-radius:.65rem; background:rgb(31 41 55); padding:.75rem; box-shadow:0 15px 35px rgb(0 0 0 / .35); font-size:.76rem; } .account-menu div { display:grid; gap:.2rem; } .account-menu small { color:rgb(148 163 184); line-height:1.35; } .account-menu a,.account-menu button { border:0; border-radius:.35rem; background:rgb(55 65 81); color:#fff; padding:.45rem .55rem; font:inherit; text-decoration:none; text-align:left; } .account-menu button { background:transparent; color:rgb(252 165 165); }
+	.account-menu { position:absolute; bottom:calc(100% + .35rem); left:0; right:0; display:grid; gap:.55rem; max-height:calc(100vh - 1.5rem); overflow-y:auto; border:1px solid rgb(71 85 105); border-radius:.65rem; background:rgb(31 41 55); padding:.75rem; box-shadow:0 15px 35px rgb(0 0 0 / .35); font-size:.76rem; } .account-menu div { display:grid; gap:.2rem; } .account-menu small { color:rgb(148 163 184); line-height:1.35; } .account-menu a,.account-menu button { border:0; border-radius:.35rem; background:rgb(55 65 81); color:#fff; padding:.45rem .55rem; font:inherit; text-decoration:none; text-align:left; } .account-menu button { background:transparent; color:rgb(252 165 165); }
 	@media (min-width: 768px) { .mobile-nav,.sidebar-scrim,.close-mobile { display:none; } .confidential-sidebar { display:flex; box-shadow:none; } }
 </style>

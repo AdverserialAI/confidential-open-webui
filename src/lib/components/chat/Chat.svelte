@@ -2815,11 +2815,38 @@
 				messages: directMessages
 			});
 			const choice = Array.isArray(completion.choices) ? completion.choices[0] : null;
-			const content = choice?.message?.content;
+			const assistantMessage = choice?.message ?? {};
+			let content = assistantMessage?.content;
+			let reasoning =
+				typeof assistantMessage?.reasoning_content === 'string'
+					? assistantMessage.reasoning_content
+					: typeof assistantMessage?.reasoning === 'string'
+						? assistantMessage.reasoning
+						: typeof assistantMessage?.thinking === 'string'
+							? assistantMessage.thinking
+							: '';
 			if (typeof content !== 'string') {
 				throw new Error('The confidential runtime returned no assistant message.');
 			}
+
+			// Normal Open WebUI inference turns provider reasoning into structured
+			// output. The confidential client bypasses that plaintext pipeline, so
+			// preserve the same UI contract after the decrypted response and signed
+			// receipt have both been verified in the browser.
+			if (!reasoning) {
+				const thought = content.match(/<think>([\s\S]*?)<\/think>\s*/i);
+				if (thought) {
+					reasoning = thought[1].trim();
+					content = content.replace(thought[0], '').trim();
+				}
+			}
 			responseMessage.content = content;
+			responseMessage.output = [
+				...(reasoning
+					? [{ type: 'reasoning', status: 'completed', content: [{ type: 'output_text', text: reasoning }] }]
+					: []),
+				{ type: 'message', status: 'completed', content: [{ type: 'output_text', text: content }] }
+			];
 			responseMessage.done = true;
 			responseMessage.info = {
 				...(responseMessage.info ?? {}),

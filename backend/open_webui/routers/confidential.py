@@ -95,6 +95,27 @@ class EntitlementRequest(BaseModel):
     endpoint_spki_sha256: str
 
 
+class BillingUsageStatus(BaseModel):
+    """Content-free membership data rendered in the chat account menu."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    member: bool
+    plan: str | None = None
+    display_name: str | None = None
+    credit_day_used: float | None = Field(default=None, ge=0)
+    credit_day_cap: float | None = Field(default=None, gt=0)
+    credit_week_used: float | None = Field(default=None, ge=0)
+    credit_week_cap: float | None = Field(default=None, gt=0)
+    output_day_used: int | None = Field(default=None, ge=0)
+    output_day_cap: int | None = Field(default=None, gt=0)
+    output_week_used: int | None = Field(default=None, ge=0)
+    output_week_cap: int | None = Field(default=None, gt=0)
+    daily_reset_at: str | None = None
+    weekly_reset_at: str | None = None
+    overage_enabled: bool | None = None
+
+
 def _bearer_token(value: str | None) -> str | None:
     if not value or not value.startswith("Bearer "):
         return None
@@ -145,6 +166,39 @@ async def confidential_config(request: Request):
         "max_output_tokens": CONFIDENTIAL_MAX_OUTPUT_TOKENS,
         "models": [{"id": model} for model in CONFIDENTIAL_ALLOWED_MODELS],
     }
+
+
+@router.get("/account")
+async def confidential_account_status(request: Request):
+    """Return a narrow, content-free membership snapshot for the signed-in user.
+
+    Billing remains the source of truth. This service proxies only the plan and
+    count-only allowance totals required by the local account menu; prompts,
+    completions, and transcript identifiers are never requested or returned.
+    """
+
+    token, _user = await _verified_session(request)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=10.0), trust_env=False) as client:
+        response = await client.get(
+            f"{CONFIDENTIAL_BILLING_BASE_URL}/account/usage-status",
+            headers={"authorization": f"Bearer {token}", "accept": "application/json"},
+        )
+
+    if response.status_code == 401:
+        raise HTTPException(status_code=401, detail="Billing could not verify your account session.")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail="Billing account status is unavailable.")
+    if "application/json" not in response.headers.get("content-type", ""):
+        raise HTTPException(status_code=502, detail="Billing returned an invalid account status.")
+    try:
+        status = BillingUsageStatus.model_validate(response.json())
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="Billing returned an invalid account status.") from exc
+    if not status.member:
+        return {"member": False}
+    if not status.plan or not status.display_name:
+        raise HTTPException(status_code=502, detail="Billing returned an incomplete membership status.")
+    return status.model_dump(exclude_none=True)
 
 
 @router.post("/entitlements")
