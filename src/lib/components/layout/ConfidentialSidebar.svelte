@@ -10,9 +10,12 @@
 	import ChatPlus from '$lib/components/icons/ChatPlus.svelte';
 	import UserCircle from '$lib/components/icons/UserCircle.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
+	import MenuLines from '$lib/components/icons/MenuLines.svelte';
+	import XMark from '$lib/components/icons/XMark.svelte';
 
 	let conversations: LocalConfidentialConversation[] = [];
 	let accountOpen = false;
+	let mobileOpen = false;
 
 	const titleFor = (conversation: LocalConfidentialConversation) => {
 		const firstUser = Object.values(conversation.history.messages ?? {}).find(
@@ -35,12 +38,14 @@
 
 	const newConversation = () => {
 		accountOpen = false;
+		mobileOpen = false;
 		temporaryChatEnabled.set(false);
 		window.location.assign('/');
 	};
 
 	const openConversation = (conversationId: string) => {
 		accountOpen = false;
+		mobileOpen = false;
 		temporaryChatEnabled.set(false);
 		window.location.assign(`/?local_confidential=${encodeURIComponent(conversationId)}`);
 	};
@@ -61,8 +66,17 @@
 	$: if ($user?.id) void reload();
 </script>
 
-<aside class="confidential-sidebar" aria-label="Confidential conversations">
+<button class="mobile-nav" on:click={() => (mobileOpen = true)} aria-label="Open local chat history">
+	<MenuLines className="size-5" />
+	<span>Chats</span>
+</button>
+{#if mobileOpen}
+	<button class="sidebar-scrim" aria-label="Close local chat history" on:click={() => (mobileOpen = false)}></button>
+{/if}
+
+<aside class:open={mobileOpen} class="confidential-sidebar" aria-label="Confidential conversations">
 	<div class="sidebar-head">
+		<button class="close-mobile" on:click={() => (mobileOpen = false)} aria-label="Close local chat history"><XMark className="size-5" /></button>
 		<div class="brand"><span class="brand-mark">A</span><span>ADVERSERIAL AI</span></div>
 		<p>Confidential chat</p>
 	</div>
@@ -99,12 +113,16 @@
 </aside>
 
 <style>
-	.confidential-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 35; display: none; width: 17.5rem; flex-direction: column; border-right: 1px solid rgb(55 65 81); background: rgb(17 24 39); color: rgb(229 231 235); padding: 1rem .75rem; }
+	.mobile-nav { position:fixed; top:.75rem; left:.75rem; z-index:30; display:flex; align-items:center; gap:.4rem; border:1px solid rgb(71 85 105); border-radius:.5rem; background:rgb(17 24 39 / .94); color:rgb(229 231 235); padding:.45rem .6rem; font-size:.76rem; font-weight:600; box-shadow:0 4px 20px rgb(0 0 0 / .2); }
+	.sidebar-scrim { position:fixed; inset:0; z-index:39; border:0; background:rgb(0 0 0 / .48); }
+	.confidential-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; display: none; width: min(17.5rem, calc(100vw - 2.5rem)); flex-direction: column; border-right: 1px solid rgb(55 65 81); background: rgb(17 24 39); color: rgb(229 231 235); padding: 1rem .75rem; box-shadow: 14px 0 35px rgb(0 0 0 / .32); }
+	.confidential-sidebar.open { display:flex; }
+	.close-mobile { position:absolute; top:.7rem; right:.7rem; display:grid; place-items:center; border:0; border-radius:.4rem; background:transparent; color:rgb(203 213 225); padding:.3rem; }
 	.sidebar-head { padding: .3rem .45rem 1rem; border-bottom: 1px solid rgb(55 65 81 / .72); } .brand { display:flex; align-items:center; gap:.5rem; font-size:.76rem; font-weight:700; letter-spacing:.045em; } .brand-mark { display:grid; place-items:center; width:1.35rem; height:1.35rem; border:1px solid rgb(148 163 184); border-radius:.35rem; font-size:.7rem; } .sidebar-head p { margin:.5rem 0 0; color:rgb(148 163 184); font-size:.72rem; text-transform:uppercase; letter-spacing:.13em; }
 	.new-chat { display:flex; align-items:center; justify-content:center; gap:.45rem; width:100%; margin-top:1rem; border:1px solid rgb(100 116 139); border-radius:.55rem; background:rgb(31 41 55); color:#fff; padding:.65rem .75rem; font-size:.82rem; font-weight:600; transition:background .15s; } .new-chat:hover { background:rgb(55 65 81); }
 	.browser-notice { display:flex; align-items:center; gap:.4rem; margin:.8rem .25rem 0; color:rgb(94 234 212); font-size:.68rem; }
 	.history { min-height:0; flex:1; overflow-y:auto; margin-top:1.25rem; padding:.1rem .15rem; } .history-label { margin:0 .3rem .55rem; color:rgb(148 163 184); font-size:.67rem; letter-spacing:.12em; text-transform:uppercase; } .empty { margin:.2rem .3rem; color:rgb(148 163 184); font-size:.75rem; line-height:1.35; } .conversation { display:block; width:100%; overflow:hidden; border:0; border-radius:.45rem; background:transparent; color:rgb(209 213 219); padding:.55rem .6rem; text-align:left; text-overflow:ellipsis; white-space:nowrap; font-size:.8rem; } .conversation:hover { background:rgb(31 41 55); color:#fff; }
 	.sidebar-footer { position:relative; display:grid; gap:.5rem; border-top:1px solid rgb(55 65 81 / .72); padding-top:.8rem; } .membership,.account { display:flex; align-items:center; gap:.55rem; width:100%; border:0; border-radius:.55rem; background:transparent; color:rgb(229 231 235); padding:.55rem; font-size:.8rem; text-align:left; } .membership { justify-content:space-between; color:rgb(153 246 228); text-decoration:none; } .membership:hover,.account:hover { background:rgb(31 41 55); } .account span:nth-child(2) { display:grid; min-width:0; flex:1; gap:.1rem; } .account strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.78rem; } .account small { overflow:hidden; color:rgb(148 163 184); font-size:.67rem; text-overflow:ellipsis; white-space:nowrap; }
 	.account-menu { position:absolute; bottom:calc(100% + .35rem); left:0; right:0; display:grid; gap:.55rem; border:1px solid rgb(71 85 105); border-radius:.65rem; background:rgb(31 41 55); padding:.75rem; box-shadow:0 15px 35px rgb(0 0 0 / .35); font-size:.76rem; } .account-menu div { display:grid; gap:.2rem; } .account-menu small { color:rgb(148 163 184); line-height:1.35; } .account-menu a,.account-menu button { border:0; border-radius:.35rem; background:rgb(55 65 81); color:#fff; padding:.45rem .55rem; font:inherit; text-decoration:none; text-align:left; } .account-menu button { background:transparent; color:rgb(252 165 165); }
-	@media (min-width: 768px) { .confidential-sidebar { display:flex; } }
+	@media (min-width: 768px) { .mobile-nav,.sidebar-scrim,.close-mobile { display:none; } .confidential-sidebar { display:flex; box-shadow:none; } }
 </style>
