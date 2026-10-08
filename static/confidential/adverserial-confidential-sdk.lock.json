@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "source_repository": "https://github.com/AdverserialAI/confidential-sdk",
+  "source_commit": "d00d8c35e35c47f0fe3114d80222d231b8af1bca",
+  "entrypoint": "typescript/src/browser.ts",
+  "sha256": "7473ff9625f03afda90c8dff106fcec83ac56f6629fb15f924121a99f9a8fb5e",
+  "license": "Apache-2.0"
+}

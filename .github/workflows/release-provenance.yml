@@ -1,0 +1,44 @@
+name: Release provenance
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  attestations: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Write pinned release manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_REPOSITORY: https://github.com/${{ github.repository }}
+        run: node scripts/write-release-manifest.mjs static/release.json
+      - run: npm run build
+      - name: Package client
+        run: |
+          tar -C build -czf confidential-open-webui-${{ github.ref_name }}.tar.gz .
+          sha256sum confidential-open-webui-${{ github.ref_name }}.tar.gz > SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: confidential-open-webui-${{ github.ref_name }}.tar.gz
+      - name: Publish immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" --verify-tag --title "${{ github.ref_name }}" --generate-notes || true
+          gh release upload "${{ github.ref_name }}" \
+            confidential-open-webui-${{ github.ref_name }}.tar.gz SHA256SUMS static/release.json --clobber
