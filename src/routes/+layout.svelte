@@ -2,7 +2,7 @@
 	import { onMount, setContext } from 'svelte';
 	import { Toaster } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
-	import { config, user, WEBUI_NAME } from '$lib/stores';
+	import { config, mobile, user, WEBUI_NAME } from '$lib/stores';
 	import { getBackendConfig } from '$lib/apis';
 	import { getSessionUser } from '$lib/apis/auths';
 	import i18n, { initI18n } from '$lib/i18n';
@@ -11,6 +11,16 @@
 	import '../app.css';
 
 	setContext('i18n', i18n);
+
+	// The confidential shell replaces Open WebUI's stock sidebar, so it owns
+	// the responsive breakpoint state used by Chat's mobile menu control.
+	onMount(() => {
+		const query = window.matchMedia('(max-width: 767px)');
+		const sync = () => mobile.set(query.matches);
+		sync();
+		query.addEventListener('change', sync);
+		return () => query.removeEventListener('change', sync);
+	});
 
 	onMount(async () => {
 		initI18n(localStorage?.locale);
