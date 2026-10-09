@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { user, temporaryChatEnabled, models } from '$lib/stores';
+	import { user, temporaryChatEnabled, models, showSidebar } from '$lib/stores';
 	import { userSignOut } from '$lib/apis/auths';
 	import {
 		deleteLocalConfidentialConversation,
@@ -9,7 +9,6 @@
 		type LocalConfidentialConversation
 	} from '$lib/confidential/local-history';
 	import PencilSquare from '$lib/components/icons/PencilSquare.svelte';
-	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Trash from '$lib/components/icons/Trash.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
@@ -21,7 +20,6 @@
 
 	let conversations: LocalConfidentialConversation[] = [];
 	let accountOpen = false;
-	let mobileOpen = false;
 	let search = '';
 	let confirmDelete: string | null = null;
 	let loadedFor = '';
@@ -115,14 +113,14 @@
 
 	const newConversation = () => {
 		accountOpen = false;
-		mobileOpen = false;
+		showSidebar.set(false);
 		temporaryChatEnabled.set(false);
 		window.location.assign('/');
 	};
 
 	const openConversation = (conversationId: string) => {
 		accountOpen = false;
-		mobileOpen = false;
+		showSidebar.set(false);
 		temporaryChatEnabled.set(false);
 		window.location.assign(`/?local_confidential=${encodeURIComponent(conversationId)}`);
 	};
@@ -172,28 +170,20 @@
 	}
 </script>
 
-<button
-	class="mobile-nav"
-	on:click={() => (mobileOpen = true)}
-	aria-label="Open local chat history"
->
-	<MenuLines className="size-5" />
-	<span>Menu</span>
-</button>
-{#if mobileOpen}
+{#if $showSidebar}
 	<button
 		class="sidebar-scrim"
 		aria-label="Close local chat history"
-		on:click={() => (mobileOpen = false)}
+		on:click={() => showSidebar.set(false)}
 	></button>
 {/if}
 
-<aside class:open={mobileOpen} class="confidential-sidebar" aria-label="Confidential conversations">
+<aside class:open={$showSidebar} class="confidential-sidebar" aria-label="Confidential conversations">
 	<header class="sidebar-head">
 		<div class="eyebrow">Adverserial AI / confidential</div>
 		<button
 			class="close-mobile"
-			on:click={() => (mobileOpen = false)}
+			on:click={() => showSidebar.set(false)}
 			aria-label="Close local chat history"><XMark className="size-5" /></button
 		>
 		<div class="brand"><span class="brand-mark">A</span><span>CyberGLM</span></div>
@@ -399,25 +389,6 @@
 		--ad-panel: #181a1c;
 		--ad-raised: #202326;
 		--ad-acid: #c9e8de;
-	}
-	.mobile-nav {
-		position: fixed;
-		top: 0.8rem;
-		left: 0.8rem;
-		z-index: 30;
-		display: flex;
-		align-items: center;
-		gap: 0.45rem;
-		border: 1px solid #484e54;
-		border-radius: 0;
-		background: #191b1d;
-		color: #f2f3f4;
-		padding: 0.62rem 0.78rem;
-		font-size: 0.68rem;
-		font-family: 'JetBrains Mono', monospace;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-		box-shadow: 0 8px 22px rgb(0 0 0/0.24);
 	}
 	.sidebar-scrim {
 		position: fixed;
@@ -916,7 +887,6 @@
 		cursor: pointer;
 	}
 	@media (min-width: 768px) {
-		.mobile-nav,
 		.sidebar-scrim,
 		.close-mobile {
 			display: none;

@@ -44,7 +44,16 @@
 
 	let submitting = false;
 
-	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
+	const safeRedirectPath = (candidate: string | null) => {
+		if (!candidate || !candidate.startsWith('/') || candidate.startsWith('//')) return '/';
+		return candidate;
+	};
+
+	const setSessionUser = async (
+		sessionUser,
+		redirectPath: string | null = null,
+		fullPageRedirect = false
+	) => {
 		if (sessionUser) {
 			console.log(sessionUser);
 			toast.success($i18n.t(`You're now logged in.`));
@@ -61,12 +70,21 @@
 				updateUserTimezone(sessionUser.token, timezone);
 			}
 
-			if (!redirectPath) {
-				redirectPath = $page.url.searchParams.get('redirect') || '/';
+			const destination = safeRedirectPath(
+				redirectPath || $page.url.searchParams.get('redirect') || '/'
+			);
+			localStorage.removeItem('redirectPath');
+
+			// OAuth returns here with a browser cookie rather than a token already
+			// present in localStorage. A document navigation avoids a SvelteKit
+			// client-router race on `/auth#` and makes the freshly persisted session
+			// available before the confidential app layout loads.
+			if (fullPageRedirect) {
+				window.location.replace(destination);
+				return;
 			}
 
-			goto(redirectPath);
-			localStorage.removeItem('redirectPath');
+			await goto(destination);
 		}
 	};
 
@@ -148,7 +166,7 @@
 		}
 
 		localStorage.token = token;
-		await setSessionUser(sessionUser, localStorage.getItem('redirectPath') || null);
+		await setSessionUser(sessionUser, localStorage.getItem('redirectPath') || null, true);
 	};
 
 	onMount(async () => {
