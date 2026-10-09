@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { getModels } from '$lib/apis';
-	import { models, user } from '$lib/stores';
+	import { models, user, showSettings } from '$lib/stores';
 	import { isConfidentialModel } from '$lib/confidential/client';
 	import VerificationCenter from '$lib/components/chat/VerificationCenter.svelte';
 	import ConfidentialSidebar from '$lib/components/layout/ConfidentialSidebar.svelte';
 	import VerificationProcess from '$lib/components/chat/VerificationProcess.svelte';
+	import SettingsModal from '$lib/components/chat/SettingsModal.svelte';
 
 	let modelsLoadedFor = '';
 	let redirecting = false;
@@ -35,6 +36,7 @@
 	</main>
 	<VerificationProcess />
 	<VerificationCenter />
+	<SettingsModal bind:show={$showSettings} />
 </div>
 
 <style>
@@ -83,6 +85,28 @@
 	:global(.adverserial-ui #messages-container > div) {
 		max-width: 72rem;
 		margin-inline: auto;
+	}
+	:global(.modal:has(.adverserial-settings-modal)) {
+		background: rgb(7 9 10 / 0.78) !important;
+	}
+	:global(.adversarial-settings-modal),
+	:global(.adverserial-settings-modal) {
+		border-color: rgb(216 218 221 / 0.28) !important;
+		border-radius: 0 !important;
+		background-color: #181a1c !important;
+		background-image:
+			linear-gradient(rgb(216 218 221 / 0.035) 1px, transparent 1px),
+			linear-gradient(90deg, rgb(216 218 221 / 0.035) 1px, transparent 1px) !important;
+		background-size: 30px 30px !important;
+		color: var(--brand-paper) !important;
+		font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+	}
+	:global(.adverserial-settings-modal nav) {
+		border-color: rgb(216 218 221 / 0.16) !important;
+		background: rgb(20 22 24 / 0.86);
+	}
+	:global(.adverserial-settings-modal button) {
+		border-radius: 0 !important;
 	}
 	:global(.adverserial-ui .verification-center-drawer),
 	:global(.adverserial-ui .process-modal) {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { user, temporaryChatEnabled, models, showSidebar } from '$lib/stores';
+	import { user, temporaryChatEnabled, models, showSidebar, showSettings } from '$lib/stores';
 	import { userSignOut } from '$lib/apis/auths';
 	import {
 		deleteLocalConfidentialConversation,
@@ -178,7 +178,11 @@
 	></button>
 {/if}
 
-<aside class:open={$showSidebar} class="confidential-sidebar" aria-label="Confidential conversations">
+<aside
+	class:open={$showSidebar}
+	class="confidential-sidebar"
+	aria-label="Confidential conversations"
+>
 	<header class="sidebar-head">
 		<div class="eyebrow">Adverserial AI / confidential</div>
 		<button
@@ -268,7 +272,7 @@
 	</section>
 
 	<div class="sidebar-footer">
-		<a class="privacy-note" href="/confidential"
+		<a class="privacy-note" href="https://adverserial.ai/confidential/"
 			><span>Local-only history</span><strong>How this chat stays private ↗</strong></a
 		>
 		{#if accountOpen}
@@ -363,7 +367,13 @@
 				<a class="account-action" href="/billing">Billing &amp; membership</a>
 				<a class="account-action" href="/notes"><Note className="size-4" /> Notes</a>
 				<a class="account-action" href="/calendar"><Calendar className="size-4" /> Calendar</a>
-				<a class="account-action" href="/settings"><Cog6 className="size-4" /> Settings</a>
+				<button
+					class="account-action"
+					on:click={() => {
+						accountOpen = false;
+						showSettings.set('account');
+					}}><Cog6 className="size-4" /> Settings</button
+				>
 				<button class="account-action signout" on:click={signOut}
 					><SignOut className="size-4" /> Sign out</button
 				>
