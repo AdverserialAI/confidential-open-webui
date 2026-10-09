@@ -16,13 +16,14 @@
 	// the responsive breakpoint state used by Chat's mobile menu control.
 	onMount(() => {
 		// Older Google OAuth clients may finish at `/#auth` (or `/auth#auth`).
-		// That hash is not a route, which leaves the browser on an empty shell.
-		// Preserve the freshly issued same-origin cookie, re-enter the real auth
-		// route, and always complete the OAuth return at the chat home page.
+		// It is a legacy marker, never a route: remove it and let this layout
+		// initialize the newly issued same-origin session cookie at the chat root.
 		if (window.location.hash === '#auth') {
-			localStorage.setItem('redirectPath', '/');
-			window.location.replace('/auth?redirect=%2F');
-			return;
+			window.history.replaceState(
+				window.history.state,
+				'',
+				`${window.location.pathname}${window.location.search}`
+			);
 		}
 
 		const query = window.matchMedia('(max-width: 767px)');
@@ -38,8 +39,17 @@
 			const backendConfig = await getBackendConfig();
 			config.set(backendConfig);
 			WEBUI_NAME.set(backendConfig?.name ?? 'Open WebUI');
-			if (localStorage.token) {
-				const sessionUser = await getSessionUser(localStorage.token).catch(() => null);
+			const cookieToken = document.cookie
+				.split('; ')
+				.find((cookie) => cookie.startsWith('token='))
+				?.slice('token='.length);
+			const sessionToken = localStorage.token || cookieToken;
+
+			if (sessionToken) {
+				const sessionUser = await getSessionUser(sessionToken).catch(() => null);
+				if (sessionUser && !localStorage.token) {
+					localStorage.token = sessionToken;
+				}
 				if (sessionUser) user.set(sessionUser);
 				else {
 					localStorage.removeItem('token');

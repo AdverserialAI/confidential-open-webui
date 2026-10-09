@@ -2152,10 +2152,14 @@ class OAuthManager:
 
         webui_url = await Config.get('webui.url')
         redirect_base_url = (str(webui_url or request.base_url)).rstrip('/')
-        redirect_url = f'{redirect_base_url}/auth'
+        # The token cookie is scoped to the chat origin.  Return successful
+        # OAuth logins straight to the chat root, where the client consumes
+        # that cookie and establishes its browser session.  Routing through
+        # `/auth` leaves some mobile OAuth clients at a non-route `#auth` URL.
+        redirect_url = redirect_base_url or '/'
 
         if error_message:
-            redirect_url = f'{redirect_url}?error={urllib.parse.quote_plus(error_message)}'
+            redirect_url = f'{redirect_base_url}/auth?error={urllib.parse.quote_plus(error_message)}'
             return RedirectResponse(url=redirect_url, headers=response.headers)
 
         response = RedirectResponse(url=redirect_url, headers=response.headers)
