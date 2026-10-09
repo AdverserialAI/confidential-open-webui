@@ -28,11 +28,68 @@
 	$: if ($user?.id && modelsLoadedFor !== $user.id) void loadModels($user.id);
 </script>
 
-<div class="app relative">
+<div class="app adverserial-ui relative">
 	<ConfidentialSidebar />
-	<main id="main-content" class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 md:ml-[17.5rem]">
+	<main id="main-content" class="min-h-screen md:ml-[17.5rem]">
 		<slot />
 	</main>
 	<VerificationProcess />
 	<VerificationCenter />
 </div>
+
+<style>
+	:global(.adverserial-ui) {
+		--brand-paper: #d8dadd;
+		--brand-ink: #191b1d;
+		--brand-dark: #151719;
+		--brand-raised: #1d2023;
+		--brand-line: rgb(216 218 221 / 0.14);
+		--brand-muted: #a0a8b2;
+		color: var(--brand-paper);
+		background: var(--brand-dark);
+		font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+	}
+	:global(.adverserial-ui #main-content) {
+		position: relative;
+		min-height: 100dvh;
+		background-color: var(--brand-dark);
+		background-image:
+			linear-gradient(rgb(216 218 221 / 0.035) 1px, transparent 1px),
+			linear-gradient(90deg, rgb(216 218 221 / 0.035) 1px, transparent 1px);
+		background-size: 42px 42px;
+		color: var(--brand-paper);
+	}
+	:global(.adverserial-ui #chat-container) {
+		background: transparent !important;
+	}
+	:global(.adverserial-ui #chat-pane) {
+		background: transparent;
+	}
+	:global(.adverserial-ui #messages-container) {
+		scrollbar-color: #66707a transparent;
+	}
+	:global(.adverserial-ui #message-input-container) {
+		border-color: rgb(216 218 221 / 0.24) !important;
+		border-radius: 0 !important;
+		background: #202326 !important;
+		box-shadow: 12px 12px 0 rgb(0 0 0 / 0.12) !important;
+	}
+	:global(.adverserial-ui #message-input-container textarea) {
+		color: var(--brand-paper) !important;
+	}
+	:global(.adverserial-ui #message-input-container textarea::placeholder) {
+		color: #8f98a3 !important;
+	}
+	:global(.adverserial-ui #messages-container > div) {
+		max-width: 72rem;
+		margin-inline: auto;
+	}
+	:global(.adverserial-ui button) {
+		transition-duration: 140ms;
+	}
+	@media (max-width: 767px) {
+		:global(.adverserial-ui #main-content) {
+			background-size: 30px 30px;
+		}
+	}
+</style>
