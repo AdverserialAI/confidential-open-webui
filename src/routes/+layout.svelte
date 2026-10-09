@@ -15,6 +15,16 @@
 	// The confidential shell replaces Open WebUI's stock sidebar, so it owns
 	// the responsive breakpoint state used by Chat's mobile menu control.
 	onMount(() => {
+		// Older Google OAuth clients may finish at `/#auth` (or `/auth#auth`).
+		// That hash is not a route, which leaves the browser on an empty shell.
+		// Preserve the freshly issued same-origin cookie, re-enter the real auth
+		// route, and always complete the OAuth return at the chat home page.
+		if (window.location.hash === '#auth') {
+			localStorage.setItem('redirectPath', '/');
+			window.location.replace('/auth?redirect=%2F');
+			return;
+		}
+
 		const query = window.matchMedia('(max-width: 767px)');
 		const sync = () => mobile.set(query.matches);
 		sync();
