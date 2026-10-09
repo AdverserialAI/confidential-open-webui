@@ -84,6 +84,29 @@
 		max-width: 72rem;
 		margin-inline: auto;
 	}
+	:global(.adverserial-ui .verification-center-drawer),
+	:global(.adverserial-ui .process-modal) {
+		border-color: rgb(216 218 221 / 0.26) !important;
+		border-radius: 0 !important;
+		background: #181a1c !important;
+		box-shadow: -18px 0 0 rgb(0 0 0 / 0.12) !important;
+	}
+	:global(.adverserial-ui .verification-center-drawer header),
+	:global(.adverserial-ui .process-modal header) {
+		border-color: rgb(216 218 221 / 0.18) !important;
+		background: #181a1c !important;
+	}
+	:global(.adverserial-ui .verification-center-drawer h1),
+	:global(.adverserial-ui .verification-center-drawer h2),
+	:global(.adverserial-ui .process-modal h1),
+	:global(.adverserial-ui .process-modal h2) {
+		letter-spacing: -0.035em;
+	}
+	:global(.adverserial-ui .verification-center-drawer code),
+	:global(.adverserial-ui .process-modal code) {
+		border-radius: 0;
+		font-family: 'JetBrains Mono', ui-monospace, monospace;
+	}
 	:global(.adverserial-ui button) {
 		transition-duration: 140ms;
 	}
