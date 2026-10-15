@@ -36,3 +36,10 @@ A production build should set `RELEASE_TAG`, `RELEASE_COMMIT`, and `RELEASE_REPO
 ## Security reporting
 
 Please report security vulnerabilities directly to [security@adverserial.ai](mailto:security@adverserial.ai).
+
+## Licensing
+
+This repository retains the upstream Open WebUI license and attribution in
+[`LICENSE`](./LICENSE). Adverserial does not grant rights beyond the rights
+already supplied by that upstream license. Third-party material, where present,
+remains under its own terms.
