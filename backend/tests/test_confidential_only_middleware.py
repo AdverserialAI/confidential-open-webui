@@ -160,14 +160,17 @@ class ConfidentialOnlyMiddlewareTests(unittest.TestCase):
 
     def test_websocket_connections_are_explicitly_closed(self):
         sent = []
+        received = []
 
         async def receive():
+            received.append(True)
             return {'type': 'websocket.connect'}
 
         async def send(message):
             sent.append(message)
 
         asyncio.run(self.middleware({'type': 'websocket', 'path': '/ws/socket.io'}, receive, send))
+        self.assertEqual(received, [True])
         self.assertEqual(sent, [{'type': 'websocket.close', 'code': 1008}])
 
 

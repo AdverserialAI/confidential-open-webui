@@ -434,6 +434,10 @@ class ConfidentialOnlyMiddleware:
             # surface.  Explicitly close rather than leaving a client hanging
             # if an upstream router or mount is restored later.
             if scope['type'] == 'websocket':
+                # Uvicorn expects the initial connect event to be consumed
+                # before an application closes a handshake.  Closing first
+                # makes a rejected upgrade look like an ASGI 500 in logs.
+                await receive()
                 await send({'type': 'websocket.close', 'code': 1008})
             return
         path = scope.get('path', '') or '/'
