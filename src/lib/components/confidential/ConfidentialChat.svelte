@@ -114,7 +114,7 @@
 	const verify = async () => {
 		if (!selectedModel) return toast.error('No confidential model is available to this account.');
 		try {
-			verifiedSession = await verifyConfidentialRuntime(selectedModel, localStorage.token);
+			verifiedSession = await verifyConfidentialRuntime(selectedModel);
 			toast.success('Runtime evidence and the attested key were verified locally.');
 		} catch (error) {
 			verifiedSession = null;
@@ -136,7 +136,7 @@
 		draft = '';
 		try {
 			await persist();
-			const { completion } = await sendConfidentialCompletion(verifiedSession, localStorage.token, {
+			const { completion } = await sendConfidentialCompletion(verifiedSession, '', {
 				model: selectedModel,
 				messages: messages.filter((message) => message.id !== answer.id).map(({ role, content }) => ({ role, content }))
 			});

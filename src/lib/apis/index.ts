@@ -40,7 +40,10 @@ export const getModels = async (
 				Accept: 'application/json',
 				'Content-Type': 'application/json',
 				...(token && { authorization: `Bearer ${token}` })
-			}
+			},
+			// Confidential chat relies on its HttpOnly same-origin session rather
+			// than a browser-readable bearer token.
+			credentials: 'include'
 		}
 	)
 		.then(async (res) => {

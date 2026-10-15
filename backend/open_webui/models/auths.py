@@ -46,8 +46,11 @@ class AuthModel(BaseModel):
 class Token(BaseModel):
     """JWT bearer-token response wrapper."""
 
-    token: str
-    token_type: str
+    # Cookie-authenticated browser sessions deliberately omit the reusable JWT
+    # from response bodies. Bearer/API clients still receive it when supplied
+    # as an explicit credential transport.
+    token: str | None = None
+    token_type: str | None = None
 
 
 class ApiKey(BaseModel):

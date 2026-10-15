@@ -15,7 +15,7 @@
 		try {
 			// This browser may select only confidential transports. A model that is
 			// not explicitly registered as confidential never reaches Chat.svelte.
-			models.set((await getModels(localStorage.token)).filter(isConfidentialModel));
+			models.set((await getModels()).filter(isConfidentialModel));
 			modelsLoadedFor = userId;
 		} catch (error) {
 			console.error('Could not load confidential model access:', error);

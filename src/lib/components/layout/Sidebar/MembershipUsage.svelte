@@ -12,7 +12,14 @@
  const reset = (date: string) => new Date(date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
  async function refresh() {
   try {
-   const r = await fetch('https://billing.adverserial.ai/account/usage-status', { headers: { Authorization: `Bearer ${localStorage.token}` }, cache: 'no-store' });
+   // Keep the Open WebUI session opaque to browser JavaScript.  The
+   // confidential control plane reads the HttpOnly same-origin cookie and
+   // obtains this narrow, content-free snapshot from billing server-side.
+   const r = await fetch('/api/v1/confidential/account', {
+    credentials: 'include',
+    headers: { accept: 'application/json' },
+    cache: 'no-store'
+   });
    if (!r.ok) throw new Error('Unavailable');
    const next = await r.json();
    if (typeof next.member !== 'boolean' || (next.member && limits.some(([key]) => !Number.isFinite(next[`${key}_used`]) || !(next[`${key}_cap`] > 0)))) throw new Error('Invalid usage');

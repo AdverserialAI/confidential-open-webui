@@ -151,7 +151,6 @@ from open_webui.routers import (
     channels,
     chats,
     confidential,
-    configs,
     evaluations,
     files,
     folders,
@@ -160,7 +159,6 @@ from open_webui.routers import (
     images,
     knowledge,
     memories,
-    models,
     notes,
     notifications,
     ollama,
@@ -829,13 +827,13 @@ app.add_middleware(ChatDomainSplitMiddleware)
 # This must remain outermost: rejected routes are never allowed to read a body.
 app.add_middleware(ConfidentialOnlyMiddleware)
 
-# Deliberately minimal route surface. Inference is exposed only by the encrypted
-# browser relay; standard OpenAI/Ollama, chat, files, tools, retrieval, task,
+# Deliberately minimal route surface. The verified browser encrypts and sends
+# inference directly to the attested runtime; this origin serves only
+# authentication, local UI settings, account display, and entitlement/handoff
+# helpers. Standard OpenAI/Ollama, chat, files, tools, retrieval, task,
 # automation and WebSocket endpoints are not mounted in this distribution.
-app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
-app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(confidential.router, prefix='/api/v1/confidential', tags=['confidential'])
 
 

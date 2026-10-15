@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const output = resolve(process.argv[2] ?? 'static/release.json');
+const wellKnownOutput = resolve(dirname(output), '.well-known/adverserial-build.json');
 const required = ['RELEASE_TAG', 'RELEASE_COMMIT', 'RELEASE_REPOSITORY'];
 for (const name of required) {
 	if (!process.env[name]) throw new Error(`${name} is required to write release provenance.`);
@@ -14,6 +15,7 @@ const sourceTree = execFileSync('git', ['ls-tree', '-r', '--full-tree', process.
 const manifest = {
 	schema: 1,
 	status: 'released',
+	service: 'confidential-open-webui',
 	repository: process.env.RELEASE_REPOSITORY,
 	tag: process.env.RELEASE_TAG,
 	commit: process.env.RELEASE_COMMIT,
@@ -22,3 +24,5 @@ const manifest = {
 };
 mkdirSync(dirname(output), { recursive: true });
 writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+mkdirSync(dirname(wellKnownOutput), { recursive: true });
+writeFileSync(wellKnownOutput, `${JSON.stringify(manifest, null, 2)}\n`);

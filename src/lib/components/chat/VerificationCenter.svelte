@@ -59,7 +59,7 @@
 		if (!model?.id || verifying) return;
 		verifying = true;
 		try {
-			await verifyConfidentialRuntime(model.id, localStorage.token);
+			await verifyConfidentialRuntime(model.id);
 			result = null;
 		} catch {
 			// The shared runtime store carries the safe, user-visible failure reason.

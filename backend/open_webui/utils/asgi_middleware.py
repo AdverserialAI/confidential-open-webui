@@ -126,6 +126,8 @@ class AppHTTPMiddleware:
 
     def _set_token(self, request: Request) -> None:
         token = get_http_authorization_cred(request.headers.get('Authorization'))
+        if token is not None and token.credentials.lower() in {'undefined', 'null'}:
+            token = None
         if token is None and (cookie_token := request.cookies.get('token')):
             token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=cookie_token)
         if token is None and (api_key := request.headers.get(CUSTOM_API_KEY_HEADER)):
@@ -298,49 +300,150 @@ class ConfidentialOnlyMiddleware:
     """Fail closed before a request body reaches any legacy Open WebUI route.
 
     This distribution intentionally exposes no plaintext prompt, chat-history,
-    file, retrieval, tool, or model-provider APIs.  The only inference route is
-    the ciphertext relay under ``/api/v1/confidential``.  Keeping this at the
-    ASGI boundary protects the guarantee even if an upstream router is added
-    back accidentally in a future merge.
+    file, retrieval, tool, or model-provider APIs.  Inference goes directly
+    from the verified browser client to the attested runtime; this server only
+    exposes the small account and entitlement contract under
+    ``/api/v1/confidential``.  Keeping this at the ASGI boundary protects the
+    guarantee even if an upstream router is added back accidentally in a
+    future merge.
     """
 
-    _ALLOWED_EXACT = {
-        '/api/config',
-        '/api/version',
-        '/api/models',
-        '/api/v1/models',
-        '/health',
-        '/ready',
-        '/health/db',
-        '/favicon.ico',
-        '/opensearch.xml',
+    # The upstream app has a very large control plane. Prefix allow-lists made
+    # every upstream route reachable again when it was mounted, including
+    # provider configuration, API-key generation, and future routes added by a
+    # merge. Keep the confidential runtime's browser contract intentionally
+    # small and method-specific instead.
+    _ALLOWED_API_METHODS = {
+        '/api/config': frozenset({'GET', 'HEAD'}),
+        '/api/version': frozenset({'GET', 'HEAD'}),
+        '/api/models': frozenset({'GET', 'HEAD'}),
+        '/api/v1/models': frozenset({'GET', 'HEAD'}),
+        '/api/v1/auths/': frozenset({'GET', 'HEAD'}),
+        '/api/v1/auths/signin': frozenset({'POST'}),
+        '/api/v1/auths/signup': frozenset({'POST'}),
+        '/api/v1/auths/ldap': frozenset({'POST'}),
+        '/api/v1/auths/signout': frozenset({'POST'}),
+        '/api/v1/auths/update/profile': frozenset({'POST'}),
+        '/api/v1/auths/update/timezone': frozenset({'POST'}),
+        '/api/v1/auths/update/password': frozenset({'POST'}),
+        '/api/v1/users/user/settings': frozenset({'GET', 'HEAD'}),
+        '/api/v1/users/user/settings/update': frozenset({'POST'}),
+        '/api/v1/confidential/config': frozenset({'GET', 'HEAD'}),
+        '/api/v1/confidential/account': frozenset({'GET', 'HEAD'}),
+        '/api/v1/confidential/entitlements': frozenset({'POST'}),
+        '/api/v1/confidential/billing-handoff': frozenset({'POST'}),
+        '/health': frozenset({'GET', 'HEAD'}),
+        '/ready': frozenset({'GET', 'HEAD'}),
+        '/health/db': frozenset({'GET', 'HEAD'}),
     }
-    _ALLOWED_PREFIXES = (
-        '/api/v1/auths',
-        '/api/v1/users',
-        '/api/v1/configs',
-        '/api/v1/confidential',
-        '/oauth',
-        '/static/',
-        '/_app/',
+    _PROFILE_IMAGE_PATH = re.compile(r'^/api/v1/users/[A-Za-z0-9_-]{1,128}/profile/image$')
+    # OAuth client registration lets the upstream app act as a generic OAuth
+    # client for arbitrary tool servers.  The confidential distribution only
+    # needs a configured identity-provider login and callback.  Likewise the
+    # cache endpoint can disclose persisted tool/file output from a restored
+    # upstream installation.  Do not let the SPA fallback make either surface
+    # reachable again.
+    _OAUTH_LOGIN_PATH = re.compile(
+        r'^/oauth/[A-Za-z0-9_-]{1,64}/(?:login|login/callback|callback)$'
     )
+    _BLOCKED_PUBLIC_PREFIXES = ('/oauth/clients/', '/cache/')
+    _BLOCKED_PUBLIC_PATHS = frozenset({'/oauth/backchannel-logout', '/opensearch.xml'})
+    _READ_ONLY_METHODS = frozenset({'GET', 'HEAD'})
+    _UNSAFE_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    def _allows(self, path: str) -> bool:
-        # Non-API paths are SPA/auth assets. They cannot reach a server-side
-        # prompt handler; API traffic is allow-listed below.
-        if not path.startswith('/api/') and not path.startswith('/api'):
+    def _allows(self, path: str, method: str) -> bool:
+        # The Svelte app needs read-only routing for assets and client-side
+        # pages.  That does *not* imply every upstream non-API endpoint is
+        # safe: reject server-side OAuth-client and cache routes explicitly.
+        # Only configured identity-provider login callbacks are needed.
+        if path != '/api' and not path.startswith('/api/'):
+            if path in self._BLOCKED_PUBLIC_PATHS or path.startswith(self._BLOCKED_PUBLIC_PREFIXES):
+                return False
+            if path.startswith('/oauth/'):
+                return method in self._READ_ONLY_METHODS and bool(self._OAUTH_LOGIN_PATH.fullmatch(path))
+            return method in self._READ_ONLY_METHODS
+        methods = self._ALLOWED_API_METHODS.get(path)
+        if methods is None and self._PROFILE_IMAGE_PATH.fullmatch(path):
+            methods = frozenset({'GET', 'HEAD'})
+        if methods is None:
+            return False
+        # CORS preflight must reach the CORS layer, but only for a route that
+        # this middleware otherwise exposes.
+        return method == 'OPTIONS' or method in methods
+
+    @staticmethod
+    def _has_session_cookie(headers: dict[str, str]) -> bool:
+        for part in headers.get('cookie', '').split(';'):
+            name, _separator, value = part.strip().partition('=')
+            if name == 'token' and value:
+                return True
+        return False
+
+    @staticmethod
+    def _has_bearer_credential(headers: dict[str, str]) -> bool:
+        authorization = headers.get('authorization', '').strip()
+        if not authorization.lower().startswith('bearer '):
+            return False
+        value = authorization[7:].strip().lower()
+        return bool(value and value not in {'undefined', 'null'})
+
+    @staticmethod
+    def _is_chat_origin(origin: str) -> bool:
+        # CHAT_DOMAIN is an operator-controlled hostname, not request input.
+        # The production route is HTTPS; permit HTTP only for explicit local
+        # development hosts.
+        domain = CHAT_DOMAIN.strip().lower().rstrip('/')
+        allowed = {f'https://{domain}'}
+        if domain.startswith('localhost') or domain.startswith('127.0.0.1') or domain.startswith('[::1]'):
+            allowed.add(f'http://{domain}')
+        return origin.strip().lower().rstrip('/') in allowed
+
+    def _allows_cookie_mutation(self, scope: Scope) -> bool:
+        """Require a same-origin browser for state changes made with a cookie.
+
+        Bearer/API clients remain compatible. A cross-site form or fetch cannot
+        forge the browser Origin header, so it cannot spend a signed-in user's
+        billing handoff or mutate account state merely by carrying their cookie.
+        For unauthenticated sign-in and sign-up requests, browsers do not carry
+        a session cookie yet; reject an explicit cross-site Fetch Metadata
+        signal as well, preventing login-CSRF without blocking headerless CLI
+        clients.
+        """
+
+        if scope.get('method', '').upper() not in self._UNSAFE_METHODS:
             return True
-        return path in self._ALLOWED_EXACT or path.startswith(self._ALLOWED_PREFIXES)
+        headers = _scope_headers(scope)
+        if self._has_bearer_credential(headers):
+            return True
+        origin = headers.get('origin', '')
+        if origin:
+            return self._is_chat_origin(origin)
+        if self._has_session_cookie(headers):
+            return False
+        # A browser cross-site navigation/form submits this header even before
+        # it has a session cookie. A headerless non-browser client remains
+        # compatible with the documented API sign-in flow.
+        return headers.get('sec-fetch-site', '').strip().lower() != 'cross-site'
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope['type'] != 'http':
+            # This runtime does not expose Open WebUI's Socket.IO / websocket
+            # surface.  Explicitly close rather than leaving a client hanging
+            # if an upstream router or mount is restored later.
+            if scope['type'] == 'websocket':
+                await send({'type': 'websocket.close', 'code': 1008})
             return
         path = scope.get('path', '') or '/'
-        if self._allows(path):
+        method = scope.get('method', 'GET').upper()
+        if self._allows(path, method) and self._allows_cookie_mutation(scope):
             await self.app(scope, receive, send)
+            return
+        if self._allows(path, method):
+            response = JSONResponse(status_code=403, content={'detail': 'Same-origin browser request required.'})
+            await response(scope, receive, send)
             return
         response = JSONResponse(
             status_code=404,

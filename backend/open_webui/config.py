@@ -2140,12 +2140,29 @@ def validate_cors_origin(origin):
         raise ValueError(f"Invalid URL structure in CORS_ALLOW_ORIGIN: '{origin}'.")
 
 
-# For production, you should only need one host as
-# fastapi serves the svelte-kit built frontend and backend from the same host and port.
-# To test CORS_ALLOW_ORIGIN locally, you can set something like
+# For production, the confidential browser and its API are same-origin. A
+# wildcard combined with credentialed CORS causes Starlette to reflect arbitrary
+# browser Origins when a session cookie is present, exposing signed-in account
+# data to any site a user visits. Keep local development permissive unless an
+# operator chooses otherwise, but make the production default the chat origin.
+# To test a separate local frontend, set e.g.
 # CORS_ALLOW_ORIGIN=http://localhost:5173;http://localhost:8080
-# in your .env file depending on your frontend port, 5173 in this case.
-CORS_ALLOW_ORIGIN = os.getenv('CORS_ALLOW_ORIGIN', '*').split(';')
+_cors_env = os.getenv('ENV', 'dev').lower()
+_cors_default = (
+    f"https://{os.getenv('CHAT_DOMAIN', 'chat.adverserial.ai').strip().lower()}"
+    if _cors_env in {'prod', 'production'}
+    else '*'
+)
+_cors_configured = os.getenv('CORS_ALLOW_ORIGIN', _cors_default).split(';')
+# Existing deployments may carry an inherited `CORS_ALLOW_ORIGIN=*` from the
+# upstream image.  Leaving it in a credentialed production CORS configuration
+# permits Origin reflection.  Remove that wildcard while preserving any
+# explicit, vetted origins; if it was the only value, use the chat origin.
+CORS_ALLOW_ORIGIN = (
+    [origin for origin in _cors_configured if origin != '*'] or [_cors_default]
+    if _cors_env in {'prod', 'production'}
+    else _cors_configured
+)
 
 # Allows custom URL schemes (e.g., app://) to be used as origins for CORS.
 # Useful for local development or desktop clients with schemes like app:// or other custom protocols.

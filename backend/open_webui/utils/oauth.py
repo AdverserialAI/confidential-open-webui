@@ -2173,7 +2173,9 @@ class OAuthManager:
         response.set_cookie(
             key='token',
             value=jwt_token,
-            httponly=False,  # Required for frontend access
+            # The confidential browser authenticates with this cookie directly;
+            # JavaScript must never read or persist the reusable session JWT.
+            httponly=True,
             samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
             secure=WEBUI_AUTH_COOKIE_SECURE,
             **({'max_age': cookie_max_age} if cookie_max_age is not None else {}),

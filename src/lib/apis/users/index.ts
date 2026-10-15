@@ -274,14 +274,15 @@ export const getAllUsers = async (token: string) => {
 	return res;
 };
 
-export const getUserSettings = async (token: string, raw = false) => {
+export const getUserSettings = async (token: string = '', raw = false) => {
 	let error = null;
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/settings${raw ? '?raw=true' : ''}`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
+			...(token && { Authorization: `Bearer ${token}` })
+		},
+		credentials: 'include'
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
@@ -307,8 +308,9 @@ export const updateUserSettings = async (token: string, settings: object) => {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			...(token && { Authorization: `Bearer ${token}` })
 		},
+		credentials: 'include',
 		body: JSON.stringify({
 			...settings
 		})
@@ -364,8 +366,9 @@ export const updateUserStatus = async (token: string, formData: object) => {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			...(token && { Authorization: `Bearer ${token}` })
 		},
+		credentials: 'include',
 		body: JSON.stringify({
 			...formData
 		})

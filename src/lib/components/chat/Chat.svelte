@@ -1500,19 +1500,13 @@
 					eventConfirmationTitle = data.title;
 					eventConfirmationMessage = data.message;
 				} else if (type === 'execute') {
-					eventCallback = cb;
-
-					try {
-						// Use Function constructor to evaluate code in a safer way
-						const asyncFunction = new Function(`return (async () => { ${data.code} })()`);
-						const result = await asyncFunction(); // Await the result of the async function
-
-						if (cb) {
-							cb(result);
-						}
-					} catch (error) {
-						console.error('Error executing code:', error);
-					}
+					// A remote event must never become browser JavaScript. Confidential
+					// inference accepts only OpenAI-style text/reasoning deltas in its
+					// separate stream parser, and this distribution does not mount the
+					// legacy tool/code-execution routes that could issue such an event.
+					// Keep this explicit rejection as a future-merge safety boundary.
+					console.warn('Ignoring disabled remote execute event.');
+					toast.error('Remote code-execution events are disabled in confidential chat.');
 				} else if (type === 'input') {
 					eventCallback = cb;
 
@@ -2806,7 +2800,7 @@
 		await tick();
 
 		try {
-			const session = await verifyConfidentialRuntime(model.id, localStorage.token);
+			const session = await verifyConfidentialRuntime(model.id);
 			const directMessages = messages
 				.filter((message) => ['system', 'user', 'assistant'].includes(message?.role))
 				.map((message) => ({ role: message.role, content: message.content ?? '' }));
@@ -2862,7 +2856,7 @@
 
 			await sendConfidentialCompletionStream(
 				session,
-				localStorage.token,
+				'',
 				{ model: model.id, messages: directMessages },
 				(update) => {
 					if (update.reasoning) reasoning += update.reasoning;

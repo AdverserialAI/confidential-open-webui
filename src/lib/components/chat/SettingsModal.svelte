@@ -81,7 +81,7 @@
 	};
 
 	const loadPersonalUiSettings = async () => {
-		const userSettings = await getUserSettings(localStorage.token, true).catch((error) => {
+		const userSettings = await getUserSettings('', true).catch((error) => {
 			console.error(error);
 			return null;
 		});
@@ -856,7 +856,7 @@
 		console.log(updated);
 		await settings.set({ ...$settings, ...updated });
 		await models.set(await getModels());
-		const saved = await updateUserSettings(localStorage.token, { ui: $settings });
+		const saved = await updateUserSettings('', { ui: $settings });
 		personalUiSettings =
 			saved?.ui && typeof saved.ui === 'object' && !Array.isArray(saved.ui) ? saved.ui : {};
 		await settings.set(
@@ -866,7 +866,7 @@
 
 	const getModels = async () => {
 		return await _getModels(
-			localStorage.token,
+			'',
 			$config?.features?.enable_direct_connections ? ($settings?.directConnections ?? null) : null
 		);
 	};

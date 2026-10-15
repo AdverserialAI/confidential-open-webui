@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import os
 import re
 import time
 import urllib
@@ -215,8 +216,12 @@ async def create_session_response(
     )
 
     return {
-        'token': token,
-        'token_type': 'Bearer',
+        # Browser sign-in uses the just-issued HttpOnly cookie. Do not also
+        # hand its reusable JWT to page JavaScript. Headless/API clients keep
+        # the historical bearer response because they do not originate from
+        # the confidential chat origin.
+        'token': None if _is_confidential_browser_origin(request) else token,
+        'token_type': None if _is_confidential_browser_origin(request) else 'Bearer',
         'expires_at': expires_at,
         'id': user.id,
         'email': user.email,
@@ -225,6 +230,23 @@ async def create_session_response(
         'profile_image_url': f'/api/v1/users/{user.id}/profile/image',
         'permissions': user_permissions,
     }
+
+
+def _is_confidential_browser_origin(request: Request) -> bool:
+    """Return true only for an exact browser Origin owned by this chat.
+
+    A same-origin browser `fetch` includes Origin on credentialed state-changing
+    requests. Matching a configured hostname rather than `request.base_url`
+    avoids a reverse proxy's internal HTTP hop making a production HTTPS login
+    look cross-origin. Local development hosts remain supported.
+    """
+
+    origin = request.headers.get('origin', '').rstrip('/').lower()
+    domain = os.getenv('CHAT_DOMAIN', 'chat.adverserial.ai').strip().lower().rstrip('/')
+    allowed = {f'https://{domain}'}
+    if domain.startswith(('localhost', '127.0.0.1', '[::1]')):
+        allowed.add(f'http://{domain}')
+    return origin in allowed
 
 
 ############################
@@ -243,7 +265,7 @@ class SessionUserInfoResponse(SessionUserResponse, UserStatus):
     date_of_birth: datetime.date | None = None
 
 
-@router.get('/', response_model=SessionUserInfoResponse)
+@router.get('/', response_model=SessionUserInfoResponse, response_model_exclude_none=True)
 async def get_session_user(
     request: Request,
     response: Response,
@@ -251,11 +273,13 @@ async def get_session_user(
     db: AsyncSession = Depends(get_async_session),
 ):
     token = None
+    using_bearer = False
     auth_header = request.headers.get('Authorization')
     if auth_header:
         auth_token = get_http_authorization_cred(auth_header)
-        if auth_token is not None:
+        if auth_token is not None and auth_token.credentials.lower() not in {'undefined', 'null'}:
             token = auth_token.credentials
+            using_bearer = True
     if token is None:
         token = request.cookies.get('token')
     if token is None and getattr(request.state, 'token', None):
@@ -288,8 +312,11 @@ async def get_session_user(
     user_permissions = await get_permissions(user.id, await Config.get('user.permissions'), db=db)
 
     response_data = {
-        'token': token,
-        'token_type': 'Bearer',
+        # Do not unwrap a HttpOnly browser session into JSON. A bearer client
+        # remains backward compatible because only an explicit Authorization
+        # credential is reflected here.
+        'token': token if using_bearer else None,
+        'token_type': 'Bearer' if using_bearer else None,
         'expires_at': expires_at,
         'id': user.id,
         'email': user.email,

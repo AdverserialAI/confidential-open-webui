@@ -8,11 +8,18 @@ chat-completion payloads.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
 import re
+import time
+import uuid
+from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,6 +30,17 @@ router = APIRouter()
 
 _CANONICAL_MODEL = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}/[a-z0-9][a-z0-9._-]{0,127}$")
 _SHA256_FINGERPRINT = re.compile(r"^sha256:[A-Za-z0-9_-]{43}$")
+_HANDOFF_KID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+# Billing uses the email subject to locate an account. Do not turn a missing
+# ORM value into the string "None" and accidentally create a shared subject.
+_BILLING_SUBJECT_EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,189}$")
+_BILLING_HANDOFF_ISSUER = "https://chat.adverserial.ai"
+_BILLING_HANDOFF_AUDIENCE = "https://billing.adverserial.ai"
+_BILLING_HANDOFF_TYPE = "adverserial-billing-chat-handoff/v1"
+_BILLING_HANDOFF_TTL_SECONDS = 60
+_BILLING_HANDOFF_DESTINATIONS = frozenset({"account", "foothold", "hacker_manifesto", "godmod3"})
+
+
 def _https_url(name: str, default: str, *, required_path: str | None = None) -> str:
     value = os.getenv(name, default).strip()
     parsed = urlparse(value)
@@ -77,6 +95,19 @@ class EntitlementRequest(BaseModel):
     endpoint_spki_sha256: str
 
 
+class BillingHandoffRequest(BaseModel):
+    """A fixed billing destination selected by the browser, signed by chat.
+
+    The browser must never choose an arbitrary return URL or carry a reusable
+    Open WebUI JWT to billing.  Billing accepts this short-lived assertion once
+    and maps the signed destination to its own local route.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    destination: Literal["account", "foothold", "hacker_manifesto", "godmod3"] = "account"
+
+
 class BillingUsageStatus(BaseModel):
     """Content-free membership data rendered in the chat account menu."""
 
@@ -85,6 +116,8 @@ class BillingUsageStatus(BaseModel):
     member: bool
     plan: str | None = None
     display_name: str | None = None
+    balance_usd: float | None = Field(default=None, ge=0)
+    wallet_usd: float | None = Field(default=None, ge=0)
     credit_day_used: float | None = Field(default=None, ge=0)
     credit_day_cap: float | None = Field(default=None, gt=0)
     credit_week_used: float | None = Field(default=None, ge=0)
@@ -102,7 +135,10 @@ def _bearer_token(value: str | None) -> str | None:
     if not value or not value.startswith("Bearer "):
         return None
     token = value.removeprefix("Bearer ").strip()
-    return token or None
+    # Old upstream UI code can interpolate a missing localStorage value as
+    # `Bearer undefined`. Treat it as absent so the HttpOnly cookie can take
+    # over during the migration, rather than turning it into a bogus credential.
+    return token if token and token.lower() not in {"undefined", "null"} else None
 
 
 def _session_token(request: Request) -> str | None:
@@ -117,6 +153,64 @@ async def _verified_session(request: Request):
     if user is None:
         raise HTTPException(status_code=401, detail="Your Open WebUI session is invalid or expired.")
     return token, user
+
+
+def _base64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def _decode_ed25519_seed(value: str) -> bytes:
+    """Read exactly the sealed `ed25519:<base64url 32-byte seed>` format."""
+
+    if not value.startswith("ed25519:"):
+        raise ValueError("BILLING_HANDOFF_PRIVATE_KEY must use the ed25519: prefix")
+    encoded = value.removeprefix("ed25519:")
+    if not encoded or not re.fullmatch(r"[A-Za-z0-9_-]+", encoded):
+        raise ValueError("BILLING_HANDOFF_PRIVATE_KEY must contain base64url data")
+    try:
+        seed = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("BILLING_HANDOFF_PRIVATE_KEY is not valid base64url") from exc
+    if len(seed) != 32:
+        raise ValueError("BILLING_HANDOFF_PRIVATE_KEY must contain a 32-byte Ed25519 seed")
+    return seed
+
+
+def _billing_handoff_signer() -> tuple[Ed25519PrivateKey, str]:
+    """Load the separate chat-only billing assertion signer without logging it."""
+
+    raw_key = os.getenv("BILLING_HANDOFF_PRIVATE_KEY", "").strip()
+    kid = os.getenv("BILLING_HANDOFF_KEY_ID", "").strip()
+    if not raw_key or not _HANDOFF_KID.fullmatch(kid):
+        raise ValueError("Billing handoff signing is not configured")
+    return Ed25519PrivateKey.from_private_bytes(_decode_ed25519_seed(raw_key)), kid
+
+
+def _mint_billing_handoff(*, email: str, destination: str, now: int | None = None) -> str:
+    """Create an independently verifiable, one-time Ed25519 billing assertion."""
+
+    normalized_email = email.strip().lower()
+    if len(normalized_email) > 254 or not _BILLING_SUBJECT_EMAIL.fullmatch(normalized_email):
+        raise ValueError("A verified email address is required for billing")
+    if destination not in _BILLING_HANDOFF_DESTINATIONS:
+        raise ValueError("Billing handoff destination is not allowed")
+    signer, kid = _billing_handoff_signer()
+    issued_at = int(time.time()) if now is None else int(now)
+    header = {"alg": "EdDSA", "kid": kid, "typ": "JWT"}
+    claims = {
+        "iss": _BILLING_HANDOFF_ISSUER,
+        "aud": _BILLING_HANDOFF_AUDIENCE,
+        "typ": _BILLING_HANDOFF_TYPE,
+        "sub": normalized_email,
+        "jti": str(uuid.uuid4()),
+        "iat": issued_at,
+        "exp": issued_at + _BILLING_HANDOFF_TTL_SECONDS,
+        "destination": destination,
+    }
+    encoded_header = _base64url(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    encoded_claims = _base64url(json.dumps(claims, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    signing_input = f"{encoded_header}.{encoded_claims}".encode("ascii")
+    return f"{encoded_header}.{encoded_claims}.{_base64url(signer.sign(signing_input))}"
 
 
 def _is_allowed_model(model: str) -> bool:
@@ -173,10 +267,34 @@ async def confidential_account_status(request: Request):
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="Billing returned an invalid account status.") from exc
     if not status.member:
-        return {"member": False}
+        # A non-member can still hold prepaid wallet credit. Keep that narrow
+        # account display available without exposing any billing identifiers.
+        return status.model_dump(include={"member", "balance_usd", "wallet_usd"}, exclude_none=True)
     if not status.plan or not status.display_name:
         raise HTTPException(status_code=502, detail="Billing returned an incomplete membership status.")
     return status.model_dump(exclude_none=True)
+
+
+@router.post("/billing-handoff")
+async def issue_billing_handoff(payload: BillingHandoffRequest, request: Request):
+    """Mint a short-lived, one-time login assertion for the billing origin.
+
+    This endpoint is deliberately same-origin and cookie-authenticated in the
+    browser.  The response is a signed assertion only; no Open WebUI session
+    JWT, prompt, completion, or arbitrary redirect reaches billing.
+    """
+
+    _token, user = await _verified_session(request)
+    try:
+        email = getattr(user, "email", None)
+        if not isinstance(email, str):
+            raise ValueError("A verified email address is required for billing")
+        handoff = _mint_billing_handoff(email=email, destination=payload.destination)
+    except ValueError as exc:
+        # Configuration errors must fail closed, but never disclose key format
+        # details or material to a browser client.
+        raise HTTPException(status_code=503, detail="Secure billing handoff is unavailable.") from exc
+    return {"handoff": handoff, "expires_in": _BILLING_HANDOFF_TTL_SECONDS}
 
 
 @router.post("/entitlements")

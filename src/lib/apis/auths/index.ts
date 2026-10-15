@@ -82,14 +82,14 @@ export const updateAdminConfig = async (token: string, body: object) => {
 	return res;
 };
 
-export const getSessionUser = async (token: string) => {
+export const getSessionUser = async (token: string = '') => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			...(token && { Authorization: `Bearer ${token}` })
 		},
 		credentials: 'include'
 	})
@@ -487,6 +487,7 @@ export const updateUserProfile = async (token: string, profile: object) => {
 			'Content-Type': 'application/json',
 			...(token && { authorization: `Bearer ${token}` })
 		},
+		credentials: 'include',
 		body: JSON.stringify({
 			...profile
 		})
@@ -518,6 +519,7 @@ export const updateUserTimezone = async (token: string, timezone: string) => {
 			'Content-Type': 'application/json',
 			...(token && { authorization: `Bearer ${token}` })
 		},
+		credentials: 'include',
 		body: JSON.stringify({ timezone })
 	}).catch((err) => {
 		console.error('Failed to update timezone:', err);
@@ -533,6 +535,7 @@ export const updateUserPassword = async (token: string, password: string, newPas
 			'Content-Type': 'application/json',
 			...(token && { authorization: `Bearer ${token}` })
 		},
+		credentials: 'include',
 		body: JSON.stringify({
 			password: password,
 			new_password: newPassword

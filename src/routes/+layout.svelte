@@ -39,25 +39,15 @@
 			const backendConfig = await getBackendConfig();
 			config.set(backendConfig);
 			WEBUI_NAME.set(backendConfig?.name ?? 'Open WebUI');
-			const cookieToken = document.cookie
-				.split('; ')
-				.find((cookie) => cookie.startsWith('token='))
-				?.slice('token='.length);
-			const sessionToken = localStorage.token || cookieToken;
-
-			if (sessionToken) {
-				const sessionUser = await getSessionUser(sessionToken).catch(() => null);
-				if (sessionUser && !localStorage.token) {
-					localStorage.token = sessionToken;
-				}
-				if (sessionUser) user.set(sessionUser);
-				else {
-					localStorage.removeItem('token');
-					user.set(null);
-				}
-			} else {
-				user.set(null);
-			}
+			// A historical Open WebUI build stored its reusable JWT in browser
+			// storage. Migrate it away once, then use only the HttpOnly same-origin
+			// cookie for the session lookup.
+			localStorage.removeItem('token');
+			const sessionUser = await getSessionUser().catch(() => null);
+			if (sessionUser) {
+				const { token: _token, token_type: _tokenType, ...safeSessionUser } = sessionUser;
+				user.set(safeSessionUser);
+			} else user.set(null);
 		} catch (error) {
 			console.error('Confidential Open WebUI could not initialize:', error);
 			await goto('/error');

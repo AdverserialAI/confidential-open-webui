@@ -752,12 +752,17 @@ WEBUI_SECRET_KEY = os.getenv(
 ENABLE_VALVE_ENCRYPTION = os.getenv('ENABLE_VALVE_ENCRYPTION', 'False').lower() == 'true'
 
 WEBUI_SESSION_COOKIE_SAME_SITE = os.getenv('WEBUI_SESSION_COOKIE_SAME_SITE', 'lax')
-WEBUI_SESSION_COOKIE_SECURE = os.getenv('WEBUI_SESSION_COOKIE_SECURE', 'false').lower() == 'true'
+# The container is explicitly built with ENV=prod.  A secure default prevents a
+# production deployment from accidentally emitting a reusable session over an
+# HTTP hop when an operator has not supplied an override. Local development
+# remains usable without TLS.
+_COOKIE_SECURE_DEFAULT = 'true' if ENV.lower() in {'prod', 'production'} else 'false'
+WEBUI_SESSION_COOKIE_SECURE = os.getenv('WEBUI_SESSION_COOKIE_SECURE', _COOKIE_SECURE_DEFAULT).lower() == 'true'
 WEBUI_AUTH_COOKIE_SAME_SITE = os.getenv('WEBUI_AUTH_COOKIE_SAME_SITE', WEBUI_SESSION_COOKIE_SAME_SITE)
 WEBUI_AUTH_COOKIE_SECURE = (
     os.getenv(
         'WEBUI_AUTH_COOKIE_SECURE',
-        os.getenv('WEBUI_SESSION_COOKIE_SECURE', 'false'),
+        os.getenv('WEBUI_SESSION_COOKIE_SECURE', _COOKIE_SECURE_DEFAULT),
     ).lower()
     == 'true'
 )

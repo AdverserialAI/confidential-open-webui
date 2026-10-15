@@ -19,7 +19,7 @@
 	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
+	import { WEBUI_NAME, config, user } from '$lib/stores';
 
 	import { generateInitialsImage, canvasPixelTest, getUserTimezone } from '$lib/utils';
 
@@ -55,19 +55,17 @@
 		fullPageRedirect = false
 	) => {
 		if (sessionUser) {
-			console.log(sessionUser);
 			toast.success($i18n.t(`You're now logged in.`));
-			if (sessionUser.token) {
-				localStorage.token = sessionUser.token;
-			}
-			$socket.emit('user-join', { auth: { token: sessionUser.token } });
-			await user.set(sessionUser);
+			// The session cookie is HttpOnly. Keep identity display data in the
+			// Svelte store, but never retain its bearer token in a browser API.
+			const { token: _token, token_type: _tokenType, ...safeSessionUser } = sessionUser;
+			await user.set(safeSessionUser);
 			await config.set(await getBackendConfig());
 
 			// Update user timezone
 			const timezone = getUserTimezone();
-			if (sessionUser.token && timezone) {
-				updateUserTimezone(sessionUser.token, timezone);
+			if (timezone) {
+				updateUserTimezone('', timezone);
 			}
 
 			const destination = safeRedirectPath(
@@ -143,20 +141,7 @@
 	};
 
 	const oauthCallbackHandler = async () => {
-		// Get the value of the 'token' cookie
-		function getCookie(name) {
-			const match = document.cookie.match(
-				new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)')
-			);
-			return match ? decodeURIComponent(match[1]) : null;
-		}
-
-		const token = getCookie('token');
-		if (!token) {
-			return;
-		}
-
-		const sessionUser = await getSessionUser(token).catch((error) => {
+		const sessionUser = await getSessionUser().catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -165,7 +150,6 @@
 			return;
 		}
 
-		localStorage.token = token;
 		await setSessionUser(sessionUser, localStorage.getItem('redirectPath') || null, true);
 	};
 
@@ -202,8 +186,7 @@
 				!$config?.features?.enable_ldap &&
 				!$config?.features?.auth_trusted_header &&
 				!$config?.onboarding &&
-				!localStorage.token &&
-				!document.cookie.split('; ').some((c) => c.startsWith('token='))
+				!$user
 			) {
 				window.location.href = `${WEBUI_BASE_URL}/oauth/${providers[0]}/login`;
 				return;

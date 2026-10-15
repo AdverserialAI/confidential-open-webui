@@ -112,11 +112,11 @@ const base64UrlNonce = () => {
 const canonicalModelId = (value: unknown): value is string =>
 	typeof value === 'string' && /^[a-z0-9][a-z0-9._-]{0,127}\/[a-z0-9][a-z0-9._-]{0,127}$/.test(value);
 
-const fetchConfig = async (sessionToken: string): Promise<ConfidentialConfig> => {
+const fetchConfig = async (sessionToken: string = ''): Promise<ConfidentialConfig> => {
 	const response = await fetch(localEndpoint('/api/v1/confidential/config'), {
 		credentials: 'include',
 		cache: 'no-store',
-		headers: { authorization: `Bearer ${sessionToken}`, accept: 'application/json' }
+		headers: { ...(sessionToken && { authorization: `Bearer ${sessionToken}` }), accept: 'application/json' }
 	});
 	if (!response.ok) throw new Error(await responseError(response, 'Confidential client configuration is unavailable.'));
 	const config = (await response.json()) as ConfidentialConfig;
@@ -198,7 +198,7 @@ export const isConfidentialModel = (model: any) =>
 		(model.info?.meta?.confidential_transport === true || confidentialVerificationConfig(model))
 	);
 
-export const verifyConfidentialRuntime = async (modelId: string, sessionToken: string): Promise<Session> => {
+export const verifyConfidentialRuntime = async (modelId: string, sessionToken: string = ''): Promise<Session> => {
 	confidentialRuntime.set({ status: 'verifying', modelId });
 	try {
 		const [config, sdk] = await Promise.all([fetchConfig(sessionToken), loadSdk()]);
@@ -245,7 +245,7 @@ const requestEntitlement = async (
 		method: 'POST',
 		credentials: 'include',
 		headers: {
-			authorization: `Bearer ${sessionToken}`,
+			...(sessionToken && { authorization: `Bearer ${sessionToken}` }),
 			accept: 'application/json',
 			'content-type': 'application/json'
 		},
@@ -268,7 +268,7 @@ const requestEntitlement = async (
 
 export const sendConfidentialCompletion = async (
 	session: Session,
-	sessionToken: string,
+	sessionToken: string = '',
 	draft: JsonRecord
 ): Promise<{ completion: JsonRecord; receipt: string }> => {
 	if (session.proof.expiresEpoch <= Date.now() / 1000) {
@@ -319,7 +319,7 @@ export const sendConfidentialCompletion = async (
 // those raw payload boundaries: the client must reproduce the signed bytes.
 export const sendConfidentialCompletionStream = async (
 	session: Session,
-	sessionToken: string,
+	sessionToken: string = '',
 	draft: JsonRecord,
 	onUpdate: (update: ConfidentialStreamUpdate) => void
 ): Promise<{ receipt: string; usage?: JsonRecord }> => {

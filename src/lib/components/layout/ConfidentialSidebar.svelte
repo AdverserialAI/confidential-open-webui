@@ -78,8 +78,7 @@
 
 	const loadMembership = async (force = false) => {
 		if (!force && membershipLoadedAt > 0 && Date.now() - membershipLoadedAt < 30_000) return;
-		const token = localStorage.getItem('token');
-		if (!$user?.id || !token) {
+		if (!$user?.id) {
 			membership = null;
 			return;
 		}
@@ -88,7 +87,7 @@
 			const response = await fetch('/api/v1/confidential/account', {
 				credentials: 'include',
 				cache: 'no-store',
-				headers: { authorization: `Bearer ${token}`, accept: 'application/json' }
+				headers: { accept: 'application/json' }
 			});
 			membership = response.ok ? ((await response.json()) as MembershipStatus) : null;
 		} catch {

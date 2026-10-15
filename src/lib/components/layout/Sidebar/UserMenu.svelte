@@ -40,17 +40,21 @@
 	export let show = false;
 	export let role = '';
 
-	// adverserial: live wallet status from the billing service for the Billing menu item
+	// Billing is reached through the same-origin, one-time handoff route. Do not
+	// call the billing origin with a browser-visible Open WebUI credential.
 	let billing: { balance_usd?: number; wallet_usd?: number } = {};
-	const BILLING_BASE = 'https://billing.adverserial.ai';
-	async function loadBilling() {
+	const loadBilling = async () => {
 		try {
-			const r = await fetch(`${BILLING_BASE}/account/status`, {
-				headers: { Authorization: `Bearer ${localStorage.token}` }
+			const response = await fetch('/api/v1/confidential/account', {
+				credentials: 'include',
+				cache: 'no-store',
+				headers: { accept: 'application/json' }
 			});
-			if (r.ok) billing = await r.json();
-		} catch (e) {}
-	}
+			billing = response.ok ? await response.json() : {};
+		} catch {
+			billing = {};
+		}
+	};
 	$: if ($user?.email) loadBilling();
 	// pay-per-use: balance_usd is canonical; wallet_usd is the legacy alias
 	$: balance = billing.balance_usd ?? billing.wallet_usd;
@@ -84,12 +88,12 @@
 			updated = [...pinnedItems, id];
 		}
 		await settings.set({ ...$settings, pinnedMenuItems: updated });
-		await updateUserSettings(localStorage.token, { ui: $settings });
+		await updateUserSettings('', { ui: $settings });
 	};
 
 	let usage = null;
 	const getUsageInfo = async () => {
-		const res = await getUsage(localStorage.token).catch((error) => {
+		const res = await getUsage('').catch((error) => {
 			console.error('Error fetching usage info:', error);
 		});
 
@@ -123,7 +127,7 @@
 <UserStatusModal
 	bind:show={showUserStatusModal}
 	onSave={async () => {
-		user.set(await getSessionUser(localStorage.token));
+		user.set(await getSessionUser());
 	}}
 />
 
@@ -177,29 +181,11 @@
 						{/if}
 					</button>
 
-					<a
-						href="https://billing.adverserial.ai/account/session"
-						target="_blank"
-						rel="noopener"
+						<a
+							href="/billing"
 						draggable="false"
 						class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-xs w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none text-left"
-						on:click={(e) => {
-							e.preventDefault();
-							show = false;
-							// session handoff: POST the platform JWT in the body (keeps it out of URLs/logs)
-							const form = document.createElement('form');
-							form.method = 'POST';
-							form.action = 'https://billing.adverserial.ai/account/session';
-							form.target = '_blank';
-							const input = document.createElement('input');
-							input.type = 'hidden';
-							input.name = 'owui_token';
-							input.value = localStorage.token;
-							form.appendChild(input);
-							document.body.appendChild(form);
-							form.submit();
-							document.body.removeChild(form);
-						}}
+							on:click={() => (show = false)}
 					>
 						<div class="self-center min-w-0 flex-1 truncate">Billing</div>
 						{#if balance != null}
@@ -248,14 +234,14 @@
 											e.stopPropagation();
 											e.stopImmediatePropagation();
 
-											const res = await updateUserStatus(localStorage.token, {
+									const res = await updateUserStatus('', {
 												status_emoji: '',
 												status_message: ''
 											});
 
 											if (res) {
 												toast.success($i18n.t('Status cleared successfully'));
-												user.set(await getSessionUser(localStorage.token));
+										user.set(await getSessionUser());
 											} else {
 												toast.error($i18n.t('Failed to clear status'));
 											}

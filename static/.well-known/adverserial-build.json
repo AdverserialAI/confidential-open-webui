@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "status": "development",
+  "service": "confidential-open-webui",
+  "release_manifest": "/release.json",
+  "message": "A tagged CI build replaces this file with the pinned release provenance manifest."
+}

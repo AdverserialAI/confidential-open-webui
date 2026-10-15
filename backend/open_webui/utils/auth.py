@@ -356,7 +356,7 @@ async def get_current_user(
 ):
     token = None
 
-    if auth_token is not None:
+    if auth_token is not None and auth_token.credentials.lower() not in {'undefined', 'null'}:
         token = auth_token.credentials
 
     if token is None and 'token' in request.cookies:
