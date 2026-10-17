@@ -430,15 +430,18 @@ class ConfidentialOnlyMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope['type'] != 'http':
-            # This runtime does not expose Open WebUI's Socket.IO / websocket
-            # surface.  Explicitly close rather than leaving a client hanging
-            # if an upstream router or mount is restored later.
+            # The ASGI lifespan scope MUST reach the app — swallowing it skips
+            # startup entirely (app.state.redis is never assigned, so token
+            # revocation silently no-ops and /ready is permanently 503).
+            # Websockets stay explicitly closed; everything else passes through.
             if scope['type'] == 'websocket':
                 # Uvicorn expects the initial connect event to be consumed
                 # before an application closes a handshake.  Closing first
                 # makes a rejected upgrade look like an ASGI 500 in logs.
                 await receive()
                 await send({'type': 'websocket.close', 'code': 1008})
+                return
+            await self.app(scope, receive, send)
             return
         path = scope.get('path', '') or '/'
         method = scope.get('method', 'GET').upper()

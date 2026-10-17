@@ -423,8 +423,23 @@ async def update_password(
             # it was created with a random-uuid password the owner cannot
             # know, so demanding the current password locks them out of
             # setting one forever (R-business UX report, "Julian"
-            # phannguyenbaouy1). The authenticated session itself is the
-            # proof of ownership here.
+            # phannguyenbaouy1). A live session alone is NOT enough for a
+            # credential change though: require a freshly minted session
+            # (issued within the last 15 minutes), so a stolen or stale token
+            # cannot take over the account.
+            token = None
+            auth_token = request.headers.get('Authorization')
+            if auth_token and auth_token.lower().startswith('bearer '):
+                token = auth_token[len('Bearer '):]
+            if token is None:
+                token = request.cookies.get('token')
+            claims = decode_token(token) if token else None
+            iat = claims.get('iat') if claims else None
+            if not isinstance(iat, int) or int(time.time()) - iat > 900:
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    detail='Changing the password on a sign-in-linked account requires a fresh sign-in. Sign out, sign in again, and retry.',
+                )
             user = await Users.get_user_by_email(session_user.email, db=db)
         else:
             user = await Auths.authenticate_user(
@@ -848,7 +863,10 @@ async def signin(
                 db=db,
             )
     else:
-        if await signin_rate_limiter.is_limited(request.app.state.redis, form_data.email.lower()):
+        # Only FAILED attempts spend the budget: a correct password is never
+        # locked out, and spraying someone's email with junk attempts can no
+        # longer lock the owner out of their own account.
+        if await signin_rate_limiter.get_count(request.app.state.redis, form_data.email.lower()) >= signin_rate_limiter.limit:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED,
@@ -859,6 +877,9 @@ async def signin(
             lambda pw: verify_password(form_data.password, pw),
             db=db,
         )
+        if not user:
+            # Consume budget on the failure path only.
+            await signin_rate_limiter.is_limited(request.app.state.redis, form_data.email.lower())
 
     if user:
         return await create_session_response(request, user, db, response, set_cookie=True, source=auth_source)
