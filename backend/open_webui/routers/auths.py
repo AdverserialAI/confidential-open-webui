@@ -863,14 +863,11 @@ async def signin(
                 db=db,
             )
     else:
-        # Only FAILED attempts spend the budget: a correct password is never
-        # locked out, and spraying someone's email with junk attempts can no
-        # longer lock the owner out of their own account.
-        if await signin_rate_limiter.get_count(request.app.state.redis, form_data.email.lower()) >= signin_rate_limiter.limit:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED,
-            )
+        # Budget is spent by FAILED attempts only; a correct password always
+        # signs in (nobody can lock out the owner by spraying their email).
+        # Once the budget is gone, further failures get a cheap 429 without
+        # minting anything or leaking whether the password was close.
+        over_budget = await signin_rate_limiter.get_count(request.app.state.redis, form_data.email.lower()) >= signin_rate_limiter.limit
 
         user = await Auths.authenticate_user(
             form_data.email.lower(),
@@ -878,6 +875,11 @@ async def signin(
             db=db,
         )
         if not user:
+            if over_budget:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED,
+                )
             # Consume budget on the failure path only.
             await signin_rate_limiter.is_limited(request.app.state.redis, form_data.email.lower())
 
