@@ -329,6 +329,7 @@ class ConfidentialOnlyMiddleware:
         '/api/v1/users/user/settings': frozenset({'GET', 'HEAD'}),
         '/api/v1/users/user/settings/update': frozenset({'POST'}),
         '/api/v1/confidential/config': frozenset({'GET', 'HEAD'}),
+        '/api/v1/confidential/attestation': frozenset({'GET', 'HEAD'}),
         '/api/v1/confidential/account': frozenset({'GET', 'HEAD'}),
         '/api/v1/confidential/entitlements': frozenset({'POST'}),
         '/api/v1/confidential/billing-handoff': frozenset({'POST'}),

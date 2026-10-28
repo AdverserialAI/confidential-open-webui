@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from open_webui.utils.auth import get_verified_user_by_token
@@ -30,6 +30,7 @@ router = APIRouter()
 
 _CANONICAL_MODEL = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}/[a-z0-9][a-z0-9._-]{0,127}$")
 _SHA256_FINGERPRINT = re.compile(r"^sha256:[A-Za-z0-9_-]{43}$")
+_ATTESTATION_NONCE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _HANDOFF_KID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 # Billing uses the email subject to locate an account. Do not turn a missing
 # ORM value into the string "None" and accidentally create a shared subject.
@@ -238,6 +239,49 @@ async def confidential_config(request: Request):
         "max_output_tokens": CONFIDENTIAL_MAX_OUTPUT_TOKENS,
         "models": [{"id": model} for model in CONFIDENTIAL_ALLOWED_MODELS],
     }
+
+
+@router.get("/attestation")
+async def confidential_attestation(nonce: str, request: Request):
+    """Return the runtime's signed public evidence through the chat origin.
+
+    Some embedded browsers reject the direct cross-origin attestation request
+    before CORS is evaluated. The relay is restricted to one configured HTTPS
+    URL and a fresh 32-byte nonce. It never accepts prompts, ciphertext,
+    entitlements, arbitrary URLs, or reusable credentials. The browser still
+    verifies the returned receipt, nonce, hardware evidence, and endpoint key.
+    """
+
+    await _verified_session(request)
+    if not _ATTESTATION_NONCE.fullmatch(nonce):
+        raise HTTPException(status_code=400, detail="A fresh attestation nonce is required.")
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0), trust_env=False) as client:
+            response = await client.get(
+                CONFIDENTIAL_ATTESTATION_URL,
+                params={"nonce": nonce},
+                headers={"accept": "application/json"},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Runtime attestation is unavailable.") from exc
+
+    if response.status_code >= 400 or "application/json" not in response.headers.get("content-type", ""):
+        raise HTTPException(status_code=502, detail="Runtime attestation is unavailable.")
+    if len(response.content) > 512 * 1024:
+        raise HTTPException(status_code=502, detail="Runtime attestation exceeded the verification limit.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Runtime attestation returned invalid JSON.") from exc
+    if not isinstance(payload, dict) or not payload.get("evidence") or not payload.get("verification_receipt"):
+        raise HTTPException(status_code=502, detail="Runtime attestation is incomplete.")
+
+    return Response(
+        content=response.content,
+        media_type="application/json",
+        headers={"cache-control": "no-store"},
+    )
 
 
 @router.get("/account")

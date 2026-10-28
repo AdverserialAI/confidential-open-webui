@@ -213,6 +213,30 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 			throw new Error('This model is not enabled for confidential inference.');
 		}
 		const { policy, trustedReceiptKeys, minimumGPUCount } = await loadPolicy(config, modelId);
+		const configuredAttestationUrl = new URL(config.attestation_url);
+		const verificationFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+			const request = new Request(input, init);
+			const requestedUrl = new URL(request.url);
+			if (
+				requestedUrl.origin === configuredAttestationUrl.origin &&
+				requestedUrl.pathname === configuredAttestationUrl.pathname
+			) {
+				const relayUrl = new URL(localEndpoint('/api/v1/confidential/attestation'));
+				relayUrl.search = requestedUrl.search;
+				return fetch(relayUrl, {
+					method: 'GET',
+					credentials: 'include',
+					cache: 'no-store',
+					headers: {
+						...(sessionToken && { authorization: `Bearer ${sessionToken}` }),
+						accept: 'application/json'
+					}
+				});
+			}
+			// Encrypted inference remains browser-to-CVM. Only the signed public
+			// attestation document above uses the same-origin compatibility path.
+			return fetch(request);
+		}) as typeof fetch;
 		const verificationOptions: JsonRecord = {
 			baseURL: config.api_base_url,
 			expectedModelId: modelId,
@@ -230,7 +254,7 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 			// attest-proxy serves the browser CORS contract itself. Keep inference
 			// direct: the chat service receives the session for entitlement issuance,
 			// never an encrypted prompt envelope or completion stream.
-			fetchImpl: fetch
+			fetchImpl: verificationFetch
 		};
 		const client = await sdk.createVerifiedOpenAI(verificationOptions);
 		if (!client.verified || !client.proof) {
