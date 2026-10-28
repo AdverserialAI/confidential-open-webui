@@ -296,6 +296,7 @@ class ChatDomainSplitMiddleware:
         response = RedirectResponse(status_code=308, url=target)
         await response(scope, receive, send)
 
+
 class ConfidentialOnlyMiddleware:
     """Fail closed before a request body reaches any legacy Open WebUI route.
 
@@ -330,6 +331,7 @@ class ConfidentialOnlyMiddleware:
         '/api/v1/users/user/settings/update': frozenset({'POST'}),
         '/api/v1/confidential/config': frozenset({'GET', 'HEAD'}),
         '/api/v1/confidential/attestation': frozenset({'GET', 'HEAD'}),
+        '/api/v1/confidential/nvidia-jwks': frozenset({'GET', 'HEAD'}),
         '/api/v1/confidential/account': frozenset({'GET', 'HEAD'}),
         '/api/v1/confidential/entitlements': frozenset({'POST'}),
         '/api/v1/confidential/billing-handoff': frozenset({'POST'}),
@@ -338,15 +340,16 @@ class ConfidentialOnlyMiddleware:
         '/health/db': frozenset({'GET', 'HEAD'}),
     }
     _PROFILE_IMAGE_PATH = re.compile(r'^/api/v1/users/[A-Za-z0-9_-]{1,128}/profile/image$')
+    _CONFIDENTIAL_PCCS_PATH = re.compile(
+        r'^/api/v1/confidential/pccs/(?:sgx|tdx)/certification/v4/(?:pckcrl|rootcacrl|tcb|qe/identity|pckcert)$'
+    )
     # OAuth client registration lets the upstream app act as a generic OAuth
     # client for arbitrary tool servers.  The confidential distribution only
     # needs a configured identity-provider login and callback.  Likewise the
     # cache endpoint can disclose persisted tool/file output from a restored
     # upstream installation.  Do not let the SPA fallback make either surface
     # reachable again.
-    _OAUTH_LOGIN_PATH = re.compile(
-        r'^/oauth/[A-Za-z0-9_-]{1,64}/(?:login|login/callback|callback)$'
-    )
+    _OAUTH_LOGIN_PATH = re.compile(r'^/oauth/[A-Za-z0-9_-]{1,64}/(?:login|login/callback|callback)$')
     _BLOCKED_PUBLIC_PREFIXES = ('/oauth/clients/', '/cache/')
     _BLOCKED_PUBLIC_PATHS = frozenset({'/oauth/backchannel-logout', '/opensearch.xml'})
     _READ_ONLY_METHODS = frozenset({'GET', 'HEAD'})
@@ -368,6 +371,8 @@ class ConfidentialOnlyMiddleware:
             return method in self._READ_ONLY_METHODS
         methods = self._ALLOWED_API_METHODS.get(path)
         if methods is None and self._PROFILE_IMAGE_PATH.fullmatch(path):
+            methods = frozenset({'GET', 'HEAD'})
+        if methods is None and self._CONFIDENTIAL_PCCS_PATH.fullmatch(path):
             methods = frozenset({'GET', 'HEAD'})
         if methods is None:
             return False

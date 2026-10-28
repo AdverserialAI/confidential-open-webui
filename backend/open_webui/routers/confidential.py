@@ -31,6 +31,8 @@ router = APIRouter()
 _CANONICAL_MODEL = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}/[a-z0-9][a-z0-9._-]{0,127}$")
 _SHA256_FINGERPRINT = re.compile(r"^sha256:[A-Za-z0-9_-]{43}$")
 _ATTESTATION_NONCE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+_PCCS_FMSPC = re.compile(r"^[A-Fa-f0-9]{12}$")
+_PCCS_HEX = re.compile(r"^[A-Fa-f0-9]+$")
 _HANDOFF_KID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 # Billing uses the email subject to locate an account. Do not turn a missing
 # ORM value into the string "None" and accidentally create a shared subject.
@@ -63,18 +65,14 @@ def _models() -> tuple[str, ...]:
 CONFIDENTIAL_API_BASE_URL = _https_url(
     "CONFIDENTIAL_API_BASE_URL", "https://api.adverserial.ai/v1", required_path="/v1"
 )
-CONFIDENTIAL_ATTESTATION_URL = _https_url(
-    "CONFIDENTIAL_ATTESTATION_URL", "https://api.adverserial.ai/attestation"
-)
+CONFIDENTIAL_ATTESTATION_URL = _https_url("CONFIDENTIAL_ATTESTATION_URL", "https://api.adverserial.ai/attestation")
+CONFIDENTIAL_NVIDIA_JWKS_URL = "https://nras.attestation.nvidia.com/.well-known/jwks.json"
+CONFIDENTIAL_PCCS_URL = "https://pccs.phala.network"
 CONFIDENTIAL_POLICY_URL = _https_url(
     "CONFIDENTIAL_POLICY_URL", "https://verify.adverserial.ai/policies/production.json"
 )
-CONFIDENTIAL_BILLING_BASE_URL = _https_url(
-    "CONFIDENTIAL_BILLING_BASE_URL", "https://billing.adverserial.ai"
-)
-CONFIDENTIAL_RECEIPT_ISSUER = _https_url(
-    "CONFIDENTIAL_RECEIPT_ISSUER", "https://verify.adverserial.ai"
-)
+CONFIDENTIAL_BILLING_BASE_URL = _https_url("CONFIDENTIAL_BILLING_BASE_URL", "https://billing.adverserial.ai")
+CONFIDENTIAL_RECEIPT_ISSUER = _https_url("CONFIDENTIAL_RECEIPT_ISSUER", "https://verify.adverserial.ai")
 CONFIDENTIAL_RECEIPT_AUDIENCE = os.getenv("CONFIDENTIAL_RECEIPT_AUDIENCE", "https://chat.adverserial.ai").strip()
 CONFIDENTIAL_MAX_OUTPUT_TOKENS = int(os.getenv("CONFIDENTIAL_MAX_OUTPUT_TOKENS", "65536"))
 CONFIDENTIAL_ALLOWED_MODELS = _models()
@@ -281,6 +279,87 @@ async def confidential_attestation(nonce: str, request: Request):
         content=response.content,
         media_type="application/json",
         headers={"cache-control": "no-store"},
+    )
+
+
+@router.get("/nvidia-jwks")
+async def confidential_nvidia_jwks(request: Request):
+    """Return NVIDIA's public NRAS signing keys through the chat origin."""
+
+    await _verified_session(request)
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0), trust_env=False) as client:
+            response = await client.get(CONFIDENTIAL_NVIDIA_JWKS_URL, headers={"accept": "application/json"})
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="NVIDIA verification keys are unavailable.") from exc
+    if response.status_code >= 400 or len(response.content) > 256 * 1024:
+        raise HTTPException(status_code=502, detail="NVIDIA verification keys are unavailable.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="NVIDIA verification keys are invalid.") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("keys"), list):
+        raise HTTPException(status_code=502, detail="NVIDIA verification keys are invalid.")
+    return Response(content=response.content, media_type="application/json", headers={"cache-control": "no-store"})
+
+
+def _pccs_query(artifact: str, request: Request) -> dict[str, str]:
+    values = dict(request.query_params)
+    allowed: dict[str, set[str]] = {
+        "pckcrl": {"ca", "encoding"},
+        "rootcacrl": set(),
+        "tcb": {"fmspc"},
+        "qe/identity": {"update"},
+        "pckcert": {"qeid", "encrypted_ppid", "cpusvn", "pcesvn", "pceid"},
+    }
+    if artifact not in allowed or set(values) != allowed[artifact]:
+        raise HTTPException(status_code=400, detail="Unsupported collateral request.")
+    if artifact == "pckcrl" and (values.get("ca") not in {"processor", "platform"} or values.get("encoding") != "der"):
+        raise HTTPException(status_code=400, detail="Invalid collateral request.")
+    if artifact == "tcb" and not _PCCS_FMSPC.fullmatch(values.get("fmspc", "")):
+        raise HTTPException(status_code=400, detail="Invalid collateral request.")
+    if artifact == "qe/identity" and values.get("update") != "standard":
+        raise HTTPException(status_code=400, detail="Invalid collateral request.")
+    if artifact == "pckcert":
+        limits = {"qeid": 64, "encrypted_ppid": 1024, "cpusvn": 32, "pcesvn": 4, "pceid": 4}
+        if any(
+            not _PCCS_HEX.fullmatch(values.get(name, "")) or len(values[name]) > limit for name, limit in limits.items()
+        ):
+            raise HTTPException(status_code=400, detail="Invalid collateral request.")
+    return values
+
+
+@router.get("/pccs/{tee}/certification/v4/{artifact:path}")
+async def confidential_pccs(tee: str, artifact: str, request: Request):
+    """Return public Intel/Phala verification collateral through one fixed PCCS."""
+
+    await _verified_session(request)
+    if tee not in {"sgx", "tdx"}:
+        raise HTTPException(status_code=400, detail="Unsupported collateral request.")
+    query = _pccs_query(artifact, request)
+    url = f"{CONFIDENTIAL_PCCS_URL}/{tee}/certification/v4/{artifact}"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0), trust_env=False) as client:
+            response = await client.get(url, params=query)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Hardware verification collateral is unavailable.") from exc
+    if response.status_code >= 400 or len(response.content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=502, detail="Hardware verification collateral is unavailable.")
+    forwarded_headers = {"cache-control": "no-store"}
+    for name in (
+        "sgx-pck-crl-issuer-chain",
+        "sgx-tcb-info-issuer-chain",
+        "tcb-info-issuer-chain",
+        "sgx-enclave-identity-issuer-chain",
+        "sgx-pck-certificate-issuer-chain",
+        "sgx-tcbm",
+    ):
+        if value := response.headers.get(name):
+            forwarded_headers[name] = value
+    return Response(
+        content=response.content,
+        media_type=response.headers.get("content-type", "application/octet-stream"),
+        headers=forwarded_headers,
     )
 
 

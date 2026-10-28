@@ -48,6 +48,8 @@ type ConfidentialSdk = {
 	createPhalaNVIDIAVerifier: (options: {
 		minimumGPUCount: number;
 		maxGPUEvidenceAgeMs?: number;
+		fetchImpl?: typeof fetch;
+		pccsURL?: string;
 	}) => unknown;
 	verifyInferenceReceipt: (options: JsonRecord) => Promise<void>;
 };
@@ -79,7 +81,7 @@ type Session = {
 // The query pins this deployment to the SDK bundle below and prevents a
 // previously cached verifier from retaining an obsolete freshness policy.
 const browserSdkPath =
-	'/confidential/adverserial-confidential-sdk.js?v=7473ff9625f03afda90c8dff106fcec8&policy=30m';
+	'/confidential/adverserial-confidential-sdk.js?v=df5677e8521380c27a6cedf7f283c714&policy=30m';
 const maxGPUEvidenceAgeMs = 30 * 60_000;
 let sdkLoad: Promise<ConfidentialSdk> | null = null;
 
@@ -214,6 +216,7 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 		}
 		const { policy, trustedReceiptKeys, minimumGPUCount } = await loadPolicy(config, modelId);
 		const configuredAttestationUrl = new URL(config.attestation_url);
+		const nvidiaJwksUrl = new URL('https://nras.attestation.nvidia.com/.well-known/jwks.json');
 		const verificationFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 			const request = new Request(input, init);
 			const requestedUrl = new URL(request.url);
@@ -233,8 +236,19 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 					}
 				});
 			}
-			// Encrypted inference remains browser-to-CVM. Only the signed public
-			// attestation document above uses the same-origin compatibility path.
+			if (requestedUrl.href === nvidiaJwksUrl.href) {
+				return fetch(localEndpoint('/api/v1/confidential/nvidia-jwks'), {
+					method: 'GET',
+					credentials: 'include',
+					cache: 'no-store',
+					headers: {
+						...(sessionToken && { authorization: `Bearer ${sessionToken}` }),
+						accept: 'application/json'
+					}
+				});
+			}
+			// Encrypted inference remains browser-to-CVM. Only signed attestation
+			// evidence and public verification collateral use same-origin paths.
 			return fetch(request);
 		}) as typeof fetch;
 		const verificationOptions: JsonRecord = {
@@ -249,7 +263,9 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 			attestationUrl: config.attestation_url,
 			verifyHardwareEvidence: sdk.createPhalaNVIDIAVerifier({
 				minimumGPUCount,
-				maxGPUEvidenceAgeMs
+				maxGPUEvidenceAgeMs,
+				fetchImpl: verificationFetch,
+				pccsURL: localEndpoint('/api/v1/confidential/pccs')
 			}),
 			// attest-proxy serves the browser CORS contract itself. Keep inference
 			// direct: the chat service receives the session for entitlement issuance,
