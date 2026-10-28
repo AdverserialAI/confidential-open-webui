@@ -79,7 +79,7 @@ type Session = {
 // The query pins this deployment to the SDK bundle below and prevents a
 // previously cached verifier from retaining an obsolete freshness policy.
 const browserSdkPath =
-	'/confidential/adverserial-confidential-sdk.js?v=fc9c88ccd82efed2c11aa78821c53f7c';
+	'/confidential/adverserial-confidential-sdk.js?v=7473ff9625f03afda90c8dff106fcec8&policy=30m';
 const maxGPUEvidenceAgeMs = 30 * 60_000;
 let sdkLoad: Promise<ConfidentialSdk> | null = null;
 
