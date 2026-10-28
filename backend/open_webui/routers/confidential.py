@@ -68,6 +68,7 @@ CONFIDENTIAL_API_BASE_URL = _https_url(
 CONFIDENTIAL_ATTESTATION_URL = _https_url("CONFIDENTIAL_ATTESTATION_URL", "https://api.adverserial.ai/attestation")
 CONFIDENTIAL_NVIDIA_JWKS_URL = "https://nras.attestation.nvidia.com/.well-known/jwks.json"
 CONFIDENTIAL_PCCS_URL = "https://pccs.phala.network"
+_NVIDIA_JWKS_LIMIT_BYTES = 1024 * 1024
 CONFIDENTIAL_POLICY_URL = _https_url(
     "CONFIDENTIAL_POLICY_URL", "https://verify.adverserial.ai/policies/production.json"
 )
@@ -292,7 +293,7 @@ async def confidential_nvidia_jwks(request: Request):
             response = await client.get(CONFIDENTIAL_NVIDIA_JWKS_URL, headers={"accept": "application/json"})
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="NVIDIA verification keys are unavailable.") from exc
-    if response.status_code >= 400 or len(response.content) > 256 * 1024:
+    if response.status_code >= 400 or len(response.content) > _NVIDIA_JWKS_LIMIT_BYTES:
         raise HTTPException(status_code=502, detail="NVIDIA verification keys are unavailable.")
     try:
         payload = response.json()

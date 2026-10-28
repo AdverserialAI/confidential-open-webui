@@ -89,6 +89,7 @@ def test_public_collateral_routes_are_fixed_and_input_limited():
     assert 'CONFIDENTIAL_NVIDIA_JWKS_URL = "https://nras.attestation.nvidia.com/.well-known/jwks.json"' in CONFIDENTIAL_ROUTER
     assert 'CONFIDENTIAL_PCCS_URL = "https://pccs.phala.network"' in CONFIDENTIAL_ROUTER
     assert '@router.get("/nvidia-jwks")' in CONFIDENTIAL_ROUTER
+    assert '_NVIDIA_JWKS_LIMIT_BYTES = 1024 * 1024' in CONFIDENTIAL_ROUTER
     assert '@router.get("/pccs/{tee}/certification/v4/{artifact:path}")' in CONFIDENTIAL_ROUTER
     assert 'Unsupported collateral request.' in CONFIDENTIAL_ROUTER
     assert '/api/v1/confidential/nvidia-jwks' in CLIENT
