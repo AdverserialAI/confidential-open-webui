@@ -45,7 +45,10 @@ type VerifiedClient = {
 
 type ConfidentialSdk = {
 	createVerifiedOpenAI: (options: JsonRecord) => Promise<VerifiedClient>;
-	createPhalaNVIDIAVerifier: (options: { minimumGPUCount: number }) => unknown;
+	createPhalaNVIDIAVerifier: (options: {
+		minimumGPUCount: number;
+		maxGPUEvidenceAgeMs?: number;
+	}) => unknown;
 	verifyInferenceReceipt: (options: JsonRecord) => Promise<void>;
 };
 
@@ -73,7 +76,11 @@ type Session = {
 	verificationOptions: JsonRecord;
 };
 
-const browserSdkPath = '/confidential/adverserial-confidential-sdk.js';
+// The query pins this deployment to the SDK bundle below and prevents a
+// previously cached verifier from retaining an obsolete freshness policy.
+const browserSdkPath =
+	'/confidential/adverserial-confidential-sdk.js?v=fc9c88ccd82efed2c11aa78821c53f7c';
+const maxGPUEvidenceAgeMs = 30 * 60_000;
 let sdkLoad: Promise<ConfidentialSdk> | null = null;
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -216,7 +223,10 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 			expectedModelDigest: typeof policy.model_artifact_digest === 'string' ? policy.model_artifact_digest : undefined,
 			expectedRuntimeDigest: typeof policy.runtime_image_digest === 'string' ? policy.runtime_image_digest : undefined,
 			attestationUrl: config.attestation_url,
-			verifyHardwareEvidence: sdk.createPhalaNVIDIAVerifier({ minimumGPUCount }),
+			verifyHardwareEvidence: sdk.createPhalaNVIDIAVerifier({
+				minimumGPUCount,
+				maxGPUEvidenceAgeMs
+			}),
 			// attest-proxy serves the browser CORS contract itself. Keep inference
 			// direct: the chat service receives the session for entitlement issuance,
 			// never an encrypted prompt envelope or completion stream.
@@ -304,7 +314,15 @@ export const sendConfidentialCompletion = async (
 		tlsSpkiSha256: session.proof.tlsSpkiSha256,
 		attestationStateDigest: session.proof.attestationStateDigest
 	});
-	const completion = JSON.parse(responseBody) as JsonRecord;
+	let completion: JsonRecord;
+	try {
+		completion = JSON.parse(responseBody) as JsonRecord;
+	} catch {
+		throw new Error('The confidential runtime returned an incomplete JSON response.');
+	}
+	if (!isRecord(completion)) {
+		throw new Error('The confidential runtime returned an invalid JSON response.');
+	}
 	return { completion, receipt };
 };
 
