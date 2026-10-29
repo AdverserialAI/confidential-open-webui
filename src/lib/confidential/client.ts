@@ -81,7 +81,7 @@ type Session = {
 // The query pins this deployment to the SDK bundle below and prevents a
 // previously cached verifier from retaining an obsolete freshness policy.
 const browserSdkPath =
-	'/confidential/adverserial-confidential-sdk.js?v=df5677e8521380c27a6cedf7f283c714&policy=30m';
+	'/confidential/adverserial-confidential-sdk.js?v=d7c10fee19107ade22990d93a4305503&policy=rtmr3-v1';
 const maxGPUEvidenceAgeMs = 30 * 60_000;
 let sdkLoad: Promise<ConfidentialSdk> | null = null;
 
@@ -254,6 +254,7 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 		const verificationOptions: JsonRecord = {
 			baseURL: config.api_base_url,
 			expectedModelId: modelId,
+			expectedPolicy: policy,
 			trustedReceiptKeys,
 			issuer: config.receipt_issuer,
 			audience: config.receipt_audience,
