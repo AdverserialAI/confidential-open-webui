@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from open_webui.utils.auth import get_verified_user_by_token
+from open_webui.utils.identity import canonical_email, valid_user_id
 
 router = APIRouter()
 
@@ -186,10 +187,12 @@ def _billing_handoff_signer() -> tuple[Ed25519PrivateKey, str]:
     return Ed25519PrivateKey.from_private_bytes(_decode_ed25519_seed(raw_key)), kid
 
 
-def _mint_billing_handoff(*, email: str, destination: str, now: int | None = None) -> str:
+def _mint_billing_handoff(*, email: str, user_id: str, destination: str, now: int | None = None) -> str:
     """Create an independently verifiable, one-time Ed25519 billing assertion."""
 
-    normalized_email = email.strip().lower()
+    normalized_email = canonical_email(email)
+    if not valid_user_id(user_id):
+        raise ValueError("An immutable user ID is required for billing")
     if len(normalized_email) > 254 or not _BILLING_SUBJECT_EMAIL.fullmatch(normalized_email):
         raise ValueError("A verified email address is required for billing")
     if destination not in _BILLING_HANDOFF_DESTINATIONS:
@@ -202,6 +205,7 @@ def _mint_billing_handoff(*, email: str, destination: str, now: int | None = Non
         "aud": _BILLING_HANDOFF_AUDIENCE,
         "typ": _BILLING_HANDOFF_TYPE,
         "sub": normalized_email,
+        "uid": user_id,
         "jti": str(uuid.uuid4()),
         "iat": issued_at,
         "exp": issued_at + _BILLING_HANDOFF_TTL_SECONDS,
@@ -413,7 +417,7 @@ async def issue_billing_handoff(payload: BillingHandoffRequest, request: Request
         email = getattr(user, "email", None)
         if not isinstance(email, str):
             raise ValueError("A verified email address is required for billing")
-        handoff = _mint_billing_handoff(email=email, destination=payload.destination)
+        handoff = _mint_billing_handoff(email=email, user_id=getattr(user, "id", None), destination=payload.destination)
     except ValueError as exc:
         # Configuration errors must fail closed, but never disclose key format
         # details or material to a browser client.

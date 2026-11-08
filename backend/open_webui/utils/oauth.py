@@ -65,6 +65,7 @@ from open_webui.config import (
     WEBHOOK_URL,
 )
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.utils.identity import canonical_email as _validated_email, email_claim_is_verified, oauth_binding_matches
 from open_webui.env import (
     AIOHTTP_CLIENT_ALLOW_REDIRECTS,
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -125,6 +126,13 @@ from open_webui.utils.json_codec import JSONCodec
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
+
+def canonical_email(value):
+    try:
+        return _validated_email(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid account email") from exc
+
 
 OAUTH_RESOURCE_PARAMETER_MODES = {'auto', 'include', 'omit'}
 
@@ -1940,8 +1948,9 @@ class OAuthManager:
             email_claim = auth_config.OAUTH_EMAIL_CLAIM
             email = user_data.get(email_claim, '')
             # We currently mandate that email addresses are provided
-            if not email:
-                # If the provider is GitHub,and public email is not provided, we can use the access token to fetch the user's email
+            if not email or provider == 'github':
+                # GitHub's public profile email does not assert verification.
+                # Fetch its verified primary address before any email linking.
                 if provider == 'github':
                     try:
                         access_token = token.get('access_token')
@@ -1956,11 +1965,12 @@ class OAuthManager:
                                     emails = await resp.json()
                                     # use the primary email as the user's email
                                     primary_email = next(
-                                        (e['email'] for e in emails if e.get('primary')),
+                                        (e['email'] for e in emails if e.get('primary') and e.get('verified') is True),
                                         None,
                                     )
                                     if primary_email:
                                         email = primary_email
+                                        user_data['email_verified'] = True
                                     else:
                                         log.warning('No primary email found in GitHub response')
                                         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
@@ -1976,7 +1986,7 @@ class OAuthManager:
                     log.warning(f'OAuth callback failed, email is missing: {user_data}')
                     raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
-            email = email.lower()
+            email = canonical_email(email)
             # If allowed domains are configured, check if the email domain is in the list
             if (
                 '*' not in auth_config.OAUTH_ALLOWED_DOMAINS
@@ -1993,6 +2003,10 @@ class OAuthManager:
                     # Check if the user exists by email
                     user = await Users.get_user_by_email(email, db=db)
                     if user:
+                        if not email_claim_is_verified(user_data):
+                            raise HTTPException(403, detail="A verified provider email is required to link accounts")
+                        if not oauth_binding_matches(user.oauth, provider, sub):
+                            raise HTTPException(403, detail="This account is linked to a different provider identity")
                         # Update the user with the new oauth sub
                         user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
 
@@ -2024,7 +2038,7 @@ class OAuthManager:
                                 updated_fields.append('name')
                                 log.debug('Updated name for user %s', user.email)
 
-                if auth_config.OAUTH_UPDATE_EMAIL_ON_LOGIN:
+                if auth_config.OAUTH_UPDATE_EMAIL_ON_LOGIN and email_claim_is_verified(user_data):
                     email_claim = auth_config.OAUTH_EMAIL_CLAIM
                     if email_claim:
                         new_email = user_data.get(email_claim)

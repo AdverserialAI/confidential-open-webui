@@ -9,6 +9,7 @@ from open_webui.env import DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import throttle
 from open_webui.utils.validate import validate_profile_image_url
+from open_webui.utils.identity import canonical_email
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import (
     JSON,
@@ -265,6 +266,11 @@ class UserUpdateForm(BaseModel):
     profile_image_url: str | None = None
     password: str | None = None
 
+    @field_validator("email")
+    @classmethod
+    def check_email(cls, value: str | None) -> str | None:
+        return canonical_email(value) if value is not None else None
+
     @field_validator('profile_image_url', mode='before')
     @classmethod
     def check_profile_image_url(cls, v: str | None) -> str | None:
@@ -285,6 +291,7 @@ class UsersTable:
         oauth: dict | None = None,
         db: AsyncSession | None = None,
     ) -> UserModel | None:
+        email = canonical_email(email)
         try:
             profile_image_url = validate_profile_image_url(profile_image_url)
         except ValueError:
@@ -328,10 +335,15 @@ class UsersTable:
         api_key: str,
         db: AsyncSession | None = None,
     ) -> UserModel | None:
-        """Resolve a user from their API key via a JOIN on the api_key table."""
+        """Resolve only an active account with an unexpired API credential."""
+        from open_webui.models.auths import Auth
         async with get_async_db_context(db) as session:
             result = await session.execute(
-                select(User).join(ApiKey, User.id == ApiKey.user_id).where(ApiKey.key == api_key),
+                select(User).join(ApiKey, User.id == ApiKey.user_id).join(Auth, Auth.id == User.id).where(
+                    ApiKey.key == api_key,
+                    or_(ApiKey.expires_at.is_(None), ApiKey.expires_at > int(time.time())),
+                    Auth.active.is_(True),
+                ),
             )
             user = result.scalars().first()
             return UserModel.model_validate(user) if user else None
@@ -341,7 +353,11 @@ class UsersTable:
         email: str,
         db: AsyncSession | None = None,
     ) -> UserModel | None:
-        """Case-insensitive email lookup using SQL lower()."""
+        """Case-insensitive lookup without trimming or alias conversion."""
+        try:
+            email = canonical_email(email)
+        except ValueError:
+            return None
         async with get_async_db_context(db) as session:
             email_filter = func.lower(User.email) == email.lower()
             query = select(User).where(email_filter)
@@ -711,12 +727,18 @@ class UsersTable:
             return UserModel.model_validate(user)
 
     async def update_user_by_id(self, id: str, updated: dict, db: AsyncSession | None = None) -> UserModel | None:
+        updated = dict(updated)
+        if "email" in updated:
+            updated["email"] = canonical_email(updated["email"])
         async with get_async_db_context(db) as session:
             user = await session.get(User, id)
             if not user:
                 return None
             for key, value in updated.items():
                 setattr(user, key, value)
+            if 'email' in updated:
+                from open_webui.models.auths import Auth
+                await session.execute(update(Auth).where(Auth.id == id).values(email=updated['email']))
             await session.commit()
             return UserModel.model_validate(user)
 

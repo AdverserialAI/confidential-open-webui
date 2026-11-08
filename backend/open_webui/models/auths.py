@@ -10,6 +10,7 @@ import bcrypt
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.users import User, UserModel, UserProfileImageResponse, Users
 from open_webui.utils.validate import validate_profile_image_url
+from open_webui.utils.identity import canonical_email, valid_identity_email
 from pydantic import BaseModel, field_validator
 from sqlalchemy import Boolean, Column, String, Text, delete, select, update
 from sqlalchemy.exc import IntegrityError
@@ -65,6 +66,11 @@ class SigninForm(BaseModel):
     email: str
     password: str
 
+    @field_validator("email")
+    @classmethod
+    def check_email(cls, value: str) -> str:
+        return canonical_email(value)
+
 
 class LdapForm(BaseModel):
     user: str
@@ -85,6 +91,11 @@ class SignupForm(BaseModel):
     email: str
     password: str
     profile_image_url: str | None = '/user.png'
+
+    @field_validator("email")
+    @classmethod
+    def check_email(cls, value: str) -> str:
+        return canonical_email(value)
 
     @field_validator('profile_image_url')
     @classmethod
@@ -115,6 +126,7 @@ class AuthsTable:
         db: AsyncSession | None = None,
     ) -> UserModel | None:
         """Create an Auth + User pair inside a single transaction."""
+        email = canonical_email(email)
         async with get_async_db_context(db) as session:
             log.info('insert_new_auth')
 
@@ -153,7 +165,7 @@ class AuthsTable:
         """Verify email + password credentials and return the matching user."""
         log.info('authenticate_user: %s', email)
         resolved = await Users.get_user_by_email(email, db=db)
-        if not resolved:
+        if not resolved or not valid_identity_email(resolved.email):
             await verify_password(PLACEHOLDER_HASH)
             return
         # load the credential row and verify the password hash
@@ -165,6 +177,11 @@ class AuthsTable:
             if not await verify_password(credential.password):
                 return
             return resolved
+
+    async def is_user_active(self, user_id: str, db: AsyncSession | None = None) -> bool:
+        async with get_async_db_context(db) as session:
+            credential = await session.get(Auth, user_id)
+            return credential is not None and credential.active is True
 
     async def authenticate_user_by_api_key(
         self,
@@ -202,14 +219,15 @@ class AuthsTable:
         email: str,
         db: AsyncSession | None = None,
     ) -> bool:
-        """Set a new email on the auth record and propagate to the user row."""
+        """Set a new email on both records in one transaction."""
+        email = canonical_email(email)
         async with get_async_db_context(db) as session:
             auth_row = await session.get(Auth, user_id)
             if auth_row is None:
                 return False
             auth_row.email = email
+            await session.execute(update(User).where(User.id == user_id).values(email=email))
             await session.commit()
-            await Users.update_user_by_id(user_id, {'email': email}, db=session)
             return True
         # --- password modification ---
 

@@ -28,52 +28,26 @@ def _base64url_decode(value: str) -> bytes:
 
 
 def _load_router_module():
-    """Import the real router while stubbing framework-only dependencies."""
-
-    class APIRouter:
-        def get(self, *_args, **_kwargs):
-            return lambda function: function
-
-        def post(self, *_args, **_kwargs):
-            return lambda function: function
-
-    class HTTPException(Exception):
-        pass
-
-    fastapi = types.ModuleType('fastapi')
-    fastapi.APIRouter = APIRouter
-    fastapi.HTTPException = HTTPException
-    fastapi.Request = object
-
-    responses = types.ModuleType('fastapi.responses')
-    responses.JSONResponse = object
-
-    httpx = types.ModuleType('httpx')
-    httpx.AsyncClient = object
-    httpx.Timeout = object
-
+    """Load the real router with only the unrelated auth dependency replaced."""
     auth = types.ModuleType('open_webui.utils.auth')
-
     async def get_verified_user_by_token(*_args, **_kwargs):
         return None
-
     auth.get_verified_user_by_token = get_verified_user_by_token
-    open_webui = types.ModuleType('open_webui')
-    utils = types.ModuleType('open_webui.utils')
-
+    identity_spec = importlib.util.spec_from_file_location(
+        'open_webui.utils.identity', ROUTER_PATH.parent.parent / 'utils' / 'identity.py'
+    )
+    identity = importlib.util.module_from_spec(identity_spec)
+    identity_spec.loader.exec_module(identity)
     injected = {
-        'fastapi': fastapi,
-        'fastapi.responses': responses,
-        'httpx': httpx,
-        'open_webui': open_webui,
-        'open_webui.utils': utils,
+        'open_webui': types.ModuleType('open_webui'),
+        'open_webui.utils': types.ModuleType('open_webui.utils'),
         'open_webui.utils.auth': auth,
+        'open_webui.utils.identity': identity,
     }
     prior = {name: sys.modules.get(name) for name in injected}
     sys.modules.update(injected)
     try:
         spec = importlib.util.spec_from_file_location('confidential_router_under_test', ROUTER_PATH)
-        assert spec and spec.loader
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -108,7 +82,7 @@ class BillingHandoffTests(unittest.TestCase):
     def test_handoff_is_a_short_lived_signed_fixed_destination_assertion(self):
         issued_at = 1_700_000_000
         compact = self.router._mint_billing_handoff(
-            email='  Operator@Example.COM ', destination='foothold', now=issued_at
+            email='Operator@Example.COM', user_id='operator-id', destination='foothold', now=issued_at
         )
         encoded_header, encoded_claims, encoded_signature = compact.split('.')
         header = json.loads(_base64url_decode(encoded_header))
@@ -122,6 +96,7 @@ class BillingHandoffTests(unittest.TestCase):
         self.assertEqual(claims['aud'], 'https://billing.adverserial.ai')
         self.assertEqual(claims['typ'], 'adverserial-billing-chat-handoff/v1')
         self.assertEqual(claims['sub'], 'operator@example.com')
+        self.assertEqual(claims['uid'], 'operator-id')
         self.assertEqual(claims['destination'], 'foothold')
         self.assertEqual(claims['iat'], issued_at)
         self.assertEqual(claims['exp'], issued_at + 60)
@@ -130,18 +105,18 @@ class BillingHandoffTests(unittest.TestCase):
     def test_handoff_rejects_unapproved_destinations_before_signing(self):
         with self.assertRaises(ValueError):
             self.router._mint_billing_handoff(
-                email='operator@example.com', destination='https://attacker.invalid', now=1_700_000_000
+                email='operator@example.com', user_id='operator-id', destination='https://attacker.invalid', now=1_700_000_000
             )
 
     def test_handoff_requires_an_actual_email_subject(self):
-        for email in ('', '   ', 'none', 'user@', '@example.test', 'user@example.test extra'):
+        for email in ('', '   ', 'none', 'user@', '@example.test', 'user@example.test extra', ' user@example.test', 'user@example.test ', '\tuser@example.test', '\u00a0user@example.test', '\u200buser@example.test'):
             with self.subTest(email=email), self.assertRaises(ValueError):
-                self.router._mint_billing_handoff(email=email, destination='account', now=1_700_000_000)
+                self.router._mint_billing_handoff(email=email, user_id='operator-id', destination='account', now=1_700_000_000)
 
     def test_handoff_rejects_malformed_signing_material(self):
         os.environ['BILLING_HANDOFF_PRIVATE_KEY'] = 'ed25519:not-base64!'
         with self.assertRaises(ValueError):
-            self.router._mint_billing_handoff(email='operator@example.com', destination='account', now=1)
+            self.router._mint_billing_handoff(email='operator@example.com', user_id='operator-id', destination='account', now=1)
 
 
 if __name__ == '__main__':
