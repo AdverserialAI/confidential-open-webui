@@ -21,6 +21,7 @@ from open_webui.config import (
     OAUTH_PROVIDERS,
 )
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.utils.identity import canonical_email as _validated_email, email_claim_is_verified, oauth_binding_matches
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -83,6 +84,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
+
+def canonical_email(value):
+    try:
+        return _validated_email(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid account email") from exc
+
 
 log = logging.getLogger(__name__)
 
@@ -181,6 +189,9 @@ async def create_session_response(
         response: FastAPI response object (required if set_cookie is True)
         set_cookie: Whether to set the auth cookie on the response
     """
+    canonical_email(user.email)
+    if not await Auths.is_user_active(user.id, db=db):
+        raise HTTPException(status_code=401, detail=ERROR_MESSAGES.INVALID_CRED)
     expires_delta = parse_duration(await Config.get('auth.jwt_expiry'))
     expires_at = None
     if expires_delta:
@@ -423,8 +434,23 @@ async def update_password(
             # it was created with a random-uuid password the owner cannot
             # know, so demanding the current password locks them out of
             # setting one forever (R-business UX report, "Julian"
-            # phannguyenbaouy1). The authenticated session itself is the
-            # proof of ownership here.
+            # phannguyenbaouy1). A live session alone is NOT enough for a
+            # credential change though: require a freshly minted session
+            # (issued within the last 15 minutes), so a stolen or stale token
+            # cannot take over the account.
+            token = None
+            auth_token = request.headers.get('Authorization')
+            if auth_token and auth_token.lower().startswith('bearer '):
+                token = auth_token[len('Bearer '):]
+            if token is None:
+                token = request.cookies.get('token')
+            claims = decode_token(token) if token else None
+            iat = claims.get('iat') if claims else None
+            if not isinstance(iat, int) or int(time.time()) - iat > 900:
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    detail='Changing the password on a sign-in-linked account requires a fresh sign-in. Sign out, sign in again, and retry.',
+                )
             user = await Users.get_user_by_email(session_user.email, db=db)
         else:
             user = await Auths.authenticate_user(
@@ -611,11 +637,11 @@ async def ldap_auth(
         if not email:
             raise HTTPException(400, 'User does not have a valid email address.')
         elif isinstance(email, str):
-            email = email.lower()
+            email = canonical_email(email)
         elif isinstance(email, list):
-            email = email[0].lower()
+            email = canonical_email(email[0])
         else:
-            email = str(email).lower()
+            email = canonical_email(str(email))
 
         cn = str(entry['cn'])  # common name
         user_dn = entry.entry_dn  # user distinguished name
@@ -767,7 +793,7 @@ async def signin(
         if WEBUI_AUTH_TRUSTED_EMAIL_HEADER not in request.headers:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_TRUSTED_HEADER)
 
-        email = request.headers[WEBUI_AUTH_TRUSTED_EMAIL_HEADER].lower()
+        email = canonical_email(request.headers[WEBUI_AUTH_TRUSTED_EMAIL_HEADER])
         name = email
 
         if WEBUI_AUTH_TRUSTED_NAME_HEADER:
@@ -848,17 +874,25 @@ async def signin(
                 db=db,
             )
     else:
-        if await signin_rate_limiter.is_limited(request.app.state.redis, form_data.email.lower()):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED,
-            )
+        # Budget is spent by FAILED attempts only; a correct password always
+        # signs in (nobody can lock out the owner by spraying their email).
+        # Once the budget is gone, further failures get a cheap 429 without
+        # minting anything or leaking whether the password was close.
+        over_budget = await signin_rate_limiter.get_count(request.app.state.redis, form_data.email.lower()) >= signin_rate_limiter.limit
 
         user = await Auths.authenticate_user(
             form_data.email.lower(),
             lambda pw: verify_password(form_data.password, pw),
             db=db,
         )
+        if not user:
+            if over_budget:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED,
+                )
+            # Consume budget on the failure path only.
+            await signin_rate_limiter.is_limited(request.app.state.redis, form_data.email.lower())
 
     if user:
         return await create_session_response(request, user, db, response, set_cookie=True, source=auth_source)
@@ -1693,7 +1727,7 @@ async def token_exchange(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Token missing required email claim',
         )
-    email = email.lower()
+    email = canonical_email(email)
 
     # Enforce domain allowlist — same check as the normal OAuth callback
     oauth_allowed_domains = await Config.get('oauth.allowed_domains', [])
@@ -1713,6 +1747,10 @@ async def token_exchange(
         # Try to find by email if merge is enabled
         user = await Users.get_user_by_email(email, db=db)
         if user:
+            if not email_claim_is_verified(user_data):
+                raise HTTPException(403, detail="A verified provider email is required to link accounts")
+            if not oauth_binding_matches(user.oauth, provider, sub):
+                raise HTTPException(403, detail="This account is linked to a different provider identity")
             # Link the OAuth sub to this user
             user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
 

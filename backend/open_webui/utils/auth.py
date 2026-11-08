@@ -41,6 +41,7 @@ from open_webui.models.users import Users
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.misc import parse_duration
+from open_webui.utils.identity import valid_identity_email
 from pytz import UTC
 
 log = logging.getLogger(__name__)
@@ -406,7 +407,7 @@ async def get_current_user(
                 )
 
             user = await Users.get_user_by_id(data['id'])
-            if user is None:
+            if user is None or not valid_identity_email(user.email) or not await Auths.is_user_active(user.id):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail=ERROR_MESSAGES.INVALID_TOKEN,
@@ -462,7 +463,7 @@ async def get_current_user_by_api_key(request, api_key: str):
     # Each function call manages its own short-lived session internally
     user = await Users.get_user_by_api_key(api_key)
 
-    if user is None:
+    if user is None or not valid_identity_email(user.email) or not await Auths.is_user_active(user.id):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.INVALID_TOKEN,
@@ -535,7 +536,7 @@ async def get_verified_user_by_token(token: str, redis=None):
         return None
 
     user = await Users.get_user_by_id(decoded['id'])
-    if user is None or user.role not in VERIFIED_USER_ROLES:
+    if user is None or user.role not in VERIFIED_USER_ROLES or not valid_identity_email(user.email) or not await Auths.is_user_active(user.id):
         return None
 
     return user
@@ -546,7 +547,7 @@ async def get_verified_user_by_id(user_id: str | None):
         return None
 
     user = await Users.get_user_by_id(user_id)
-    if user is None or user.role not in VERIFIED_USER_ROLES:
+    if user is None or user.role not in VERIFIED_USER_ROLES or not valid_identity_email(user.email) or not await Auths.is_user_active(user.id):
         return None
 
     return user

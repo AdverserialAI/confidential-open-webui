@@ -867,10 +867,9 @@ def calculate_sha256_string(string):
 
 
 def validate_email_format(email: str) -> bool:
-    if email.endswith('@localhost'):
-        return True
+    from open_webui.utils.identity import valid_identity_email
 
-    return bool(re.match(r'[^@]+@[^@]+\.[^@]+', email))
+    return valid_identity_email(email)
 
 
 def sanitize_filename(file_name):

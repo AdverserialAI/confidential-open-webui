@@ -46,7 +46,7 @@
 						<article class="flow-card">
 							<span class="flow-number">01</span>
 							<h3>Browser or SDK</h3>
-							<p>Loads the signed policy and asks for fresh runtime evidence.</p>
+							<p>Loads the published policy and asks for fresh runtime evidence.</p>
 						</article>
 						<span class="flow-arrow" aria-hidden="true">→</span>
 						<article class="flow-card">

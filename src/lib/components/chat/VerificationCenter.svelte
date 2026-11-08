@@ -133,7 +133,7 @@
 						{#if expandedModule === 'runtime'}
 							<div class="module-detail">
 								{#if liveRuntime.status === 'verified'}
-									<p>The browser verified Intel TDX and NVIDIA evidence, the signed policy, the fresh quote-bound key, and the configured model before enabling confidential inference.</p>
+									<p>The browser verified Intel TDX and NVIDIA evidence, the published policy, the fresh quote-bound key, and the configured model before enabling confidential inference.</p>
 									<div class="fingerprint"><span>Attestation-state fingerprint</span><strong>{runtimeFingerprint}</strong><em>Attested ✓</em></div>
 									<dl class="evidence-list"><div><dt>Hardware verifier</dt><dd>{liveRuntime.proof.hardwareVerifier ?? 'Phala TDX + NVIDIA'}</dd></div><div><dt>TEE</dt><dd>{liveRuntime.proof.tee ?? 'Intel TDX'}</dd></div><div><dt>GPU evidence</dt><dd>{liveRuntime.proof.gpu ?? 'NVIDIA CC'}</dd></div><div><dt>Valid until</dt><dd>{new Date(liveRuntime.proof.expiresEpoch * 1000).toISOString()}</dd></div></dl>
 								{:else if result?.status === 'verified'}

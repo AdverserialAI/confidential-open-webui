@@ -47,6 +47,9 @@ def test_production_cors_defaults_to_the_chat_origin():
 def test_plaintext_routes_are_rejected_before_body_processing():
     assert "class ConfidentialOnlyMiddleware" in MIDDLEWARE
     assert "'/api/v1/confidential/entitlements'" in MIDDLEWARE
+    assert "'/api/v1/confidential/attestation'" in MIDDLEWARE
+    assert "'/api/v1/confidential/nvidia-jwks'" in MIDDLEWARE
+    assert '_CONFIDENTIAL_PCCS_PATH' in MIDDLEWARE
     assert "does not expose plaintext prompt or server transcript routes" in MIDDLEWARE
 
 
@@ -69,7 +72,28 @@ def test_open_webui_does_not_accept_a_ciphertext_relay():
 def test_browser_confidential_transport_stays_direct_to_the_attested_api():
     assert 'relayFetch' not in CLIENT
     assert '/api/v1/confidential/relay' not in CLIENT
-    assert 'fetchImpl: fetch' in CLIENT
+    assert '/api/v1/confidential/attestation' in CLIENT
+    assert 'fetchImpl: verificationFetch' in CLIENT
+    assert 'return fetch(request);' in CLIENT
+
+
+def test_attestation_compatibility_route_cannot_relay_prompts_or_arbitrary_urls():
+    assert '@router.get("/attestation")' in CONFIDENTIAL_ROUTER
+    assert 'CONFIDENTIAL_ATTESTATION_URL' in CONFIDENTIAL_ROUTER
+    assert 'params={"nonce": nonce}' in CONFIDENTIAL_ROUTER
+    assert 'requestBody' not in CONFIDENTIAL_ROUTER
+    assert 'chat/completions' not in CONFIDENTIAL_ROUTER
+
+
+def test_public_collateral_routes_are_fixed_and_input_limited():
+    assert 'CONFIDENTIAL_NVIDIA_JWKS_URL = "https://nras.attestation.nvidia.com/.well-known/jwks.json"' in CONFIDENTIAL_ROUTER
+    assert 'CONFIDENTIAL_PCCS_URL = "https://pccs.phala.network"' in CONFIDENTIAL_ROUTER
+    assert '@router.get("/nvidia-jwks")' in CONFIDENTIAL_ROUTER
+    assert '_NVIDIA_JWKS_LIMIT_BYTES = 1024 * 1024' in CONFIDENTIAL_ROUTER
+    assert '@router.get("/pccs/{tee}/certification/v4/{artifact:path}")' in CONFIDENTIAL_ROUTER
+    assert 'Unsupported collateral request.' in CONFIDENTIAL_ROUTER
+    assert '/api/v1/confidential/nvidia-jwks' in CLIENT
+    assert "pccsURL: localEndpoint('/api/v1/confidential/pccs')" in CLIENT
 
 
 def test_legacy_event_execution_cannot_evaluate_remote_code():

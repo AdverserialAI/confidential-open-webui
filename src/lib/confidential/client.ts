@@ -45,7 +45,12 @@ type VerifiedClient = {
 
 type ConfidentialSdk = {
 	createVerifiedOpenAI: (options: JsonRecord) => Promise<VerifiedClient>;
-	createPhalaNVIDIAVerifier: (options: { minimumGPUCount: number }) => unknown;
+	createPhalaNVIDIAVerifier: (options: {
+		minimumGPUCount: number;
+		maxGPUEvidenceAgeMs?: number;
+		fetchImpl?: typeof fetch;
+		pccsURL?: string;
+	}) => unknown;
 	verifyInferenceReceipt: (options: JsonRecord) => Promise<void>;
 };
 
@@ -73,7 +78,11 @@ type Session = {
 	verificationOptions: JsonRecord;
 };
 
-const browserSdkPath = '/confidential/adverserial-confidential-sdk.js';
+// The query pins this deployment to the SDK bundle below and prevents a
+// previously cached verifier from retaining an obsolete freshness policy.
+const browserSdkPath =
+	'/confidential/adverserial-confidential-sdk.js?v=d7c10fee19107ade22990d93a4305503&policy=rtmr3-v1';
+const maxGPUEvidenceAgeMs = 30 * 60_000;
 let sdkLoad: Promise<ConfidentialSdk> | null = null;
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -206,9 +215,46 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 			throw new Error('This model is not enabled for confidential inference.');
 		}
 		const { policy, trustedReceiptKeys, minimumGPUCount } = await loadPolicy(config, modelId);
+		const configuredAttestationUrl = new URL(config.attestation_url);
+		const nvidiaJwksUrl = new URL('https://nras.attestation.nvidia.com/.well-known/jwks.json');
+		const verificationFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+			const request = new Request(input, init);
+			const requestedUrl = new URL(request.url);
+			if (
+				requestedUrl.origin === configuredAttestationUrl.origin &&
+				requestedUrl.pathname === configuredAttestationUrl.pathname
+			) {
+				const relayUrl = new URL(localEndpoint('/api/v1/confidential/attestation'));
+				relayUrl.search = requestedUrl.search;
+				return fetch(relayUrl, {
+					method: 'GET',
+					credentials: 'include',
+					cache: 'no-store',
+					headers: {
+						...(sessionToken && { authorization: `Bearer ${sessionToken}` }),
+						accept: 'application/json'
+					}
+				});
+			}
+			if (requestedUrl.href === nvidiaJwksUrl.href) {
+				return fetch(localEndpoint('/api/v1/confidential/nvidia-jwks'), {
+					method: 'GET',
+					credentials: 'include',
+					cache: 'no-store',
+					headers: {
+						...(sessionToken && { authorization: `Bearer ${sessionToken}` }),
+						accept: 'application/json'
+					}
+				});
+			}
+			// Encrypted inference remains browser-to-CVM. Only signed attestation
+			// evidence and public verification collateral use same-origin paths.
+			return fetch(request);
+		}) as typeof fetch;
 		const verificationOptions: JsonRecord = {
 			baseURL: config.api_base_url,
 			expectedModelId: modelId,
+			expectedPolicy: policy,
 			trustedReceiptKeys,
 			issuer: config.receipt_issuer,
 			audience: config.receipt_audience,
@@ -216,11 +262,16 @@ export const verifyConfidentialRuntime = async (modelId: string, sessionToken: s
 			expectedModelDigest: typeof policy.model_artifact_digest === 'string' ? policy.model_artifact_digest : undefined,
 			expectedRuntimeDigest: typeof policy.runtime_image_digest === 'string' ? policy.runtime_image_digest : undefined,
 			attestationUrl: config.attestation_url,
-			verifyHardwareEvidence: sdk.createPhalaNVIDIAVerifier({ minimumGPUCount }),
+			verifyHardwareEvidence: sdk.createPhalaNVIDIAVerifier({
+				minimumGPUCount,
+				maxGPUEvidenceAgeMs,
+				fetchImpl: verificationFetch,
+				pccsURL: localEndpoint('/api/v1/confidential/pccs')
+			}),
 			// attest-proxy serves the browser CORS contract itself. Keep inference
 			// direct: the chat service receives the session for entitlement issuance,
 			// never an encrypted prompt envelope or completion stream.
-			fetchImpl: fetch
+			fetchImpl: verificationFetch
 		};
 		const client = await sdk.createVerifiedOpenAI(verificationOptions);
 		if (!client.verified || !client.proof) {
@@ -304,7 +355,15 @@ export const sendConfidentialCompletion = async (
 		tlsSpkiSha256: session.proof.tlsSpkiSha256,
 		attestationStateDigest: session.proof.attestationStateDigest
 	});
-	const completion = JSON.parse(responseBody) as JsonRecord;
+	let completion: JsonRecord;
+	try {
+		completion = JSON.parse(responseBody) as JsonRecord;
+	} catch {
+		throw new Error('The confidential runtime returned an incomplete JSON response.');
+	}
+	if (!isRecord(completion)) {
+		throw new Error('The confidential runtime returned an invalid JSON response.');
+	}
 	return { completion, receipt };
 };
 

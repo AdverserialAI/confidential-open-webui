@@ -16,10 +16,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from fastapi.responses import JSONResponse
 from open_webui.config import OAUTH_PROVIDERS
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.utils.identity import canonical_email as _validated_email
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import SCIM_AUTH_PROVIDER
 from open_webui.internal.db import get_async_session
 from open_webui.models.groups import GroupModel, Groups
+from open_webui.models.auths import Auths
 from open_webui.models.users import UserModel, Users
 from open_webui.utils.auth import (
     decode_token,
@@ -33,6 +35,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+def canonical_email(value):
+    try:
+        return _validated_email(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid account email") from exc
+
 
 # SCIM 2.0 Schema URIs
 SCIM_USER_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:User'
@@ -593,7 +602,7 @@ async def create_user(
         if entry.primary:
             email = entry.value
             break
-    email = email.lower()
+    email = canonical_email(email)
 
     # Check for duplicate by email
     existing_user = await Users.get_user_by_email(email, db=db)
@@ -698,6 +707,9 @@ async def update_user(
     if user_data.photos and len(user_data.photos) > 0:
         update_data['profile_image_url'] = user_data.photos[0].value
 
+    if 'email' in update_data:
+        update_data['email'] = canonical_email(update_data['email'])
+        await Auths.update_email_by_id(user_id, update_data['email'], db=db)
     updated_user = await Users.update_user_by_id(user_id, update_data, db=db)
     if not updated_user:
         raise HTTPException(
@@ -778,6 +790,9 @@ async def patch_user(
 
     # Update user
     if update_data:
+        if 'email' in update_data:
+            update_data['email'] = canonical_email(update_data['email'])
+            await Auths.update_email_by_id(user_id, update_data['email'], db=db)
         updated_user = await Users.update_user_by_id(user_id, update_data, db=db)
         if not updated_user:
             raise HTTPException(
