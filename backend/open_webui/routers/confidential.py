@@ -29,7 +29,7 @@ from open_webui.utils.identity import canonical_email, valid_user_id
 
 router = APIRouter()
 
-_CANONICAL_MODEL = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}/[a-z0-9][a-z0-9._-]{0,127}$")
+_CANONICAL_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SHA256_FINGERPRINT = re.compile(r"^sha256:[A-Za-z0-9_-]{43}$")
 _ATTESTATION_NONCE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _PCCS_FMSPC = re.compile(r"^[A-Fa-f0-9]{12}$")
@@ -42,7 +42,7 @@ _BILLING_HANDOFF_ISSUER = "https://chat.adverserial.ai"
 _BILLING_HANDOFF_AUDIENCE = "https://billing.adverserial.ai"
 _BILLING_HANDOFF_TYPE = "adverserial-billing-chat-handoff/v1"
 _BILLING_HANDOFF_TTL_SECONDS = 60
-_BILLING_HANDOFF_DESTINATIONS = frozenset({"account", "foothold", "hacker_manifesto", "godmod3"})
+_BILLING_HANDOFF_DESTINATIONS = frozenset({"account", "trinity"})
 
 
 def _https_url(name: str, default: str, *, required_path: str | None = None) -> str:
@@ -56,7 +56,7 @@ def _https_url(name: str, default: str, *, required_path: str | None = None) -> 
 
 
 def _models() -> tuple[str, ...]:
-    configured = os.getenv("CONFIDENTIAL_ALLOWED_MODELS", "lordx64/cyberglm")
+    configured = os.getenv("CONFIDENTIAL_ALLOWED_MODELS", "adverserial/cyberseek")
     values = tuple(value.strip() for value in configured.split(",") if value.strip())
     if not values or any(not _CANONICAL_MODEL.fullmatch(value) for value in values):
         raise RuntimeError("CONFIDENTIAL_ALLOWED_MODELS must contain canonical publisher/model IDs")
@@ -106,7 +106,7 @@ class BillingHandoffRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    destination: Literal["account", "foothold", "hacker_manifesto", "godmod3"] = "account"
+    destination: Literal["account", "trinity"] = "account"
 
 
 class BillingUsageStatus(BaseModel):

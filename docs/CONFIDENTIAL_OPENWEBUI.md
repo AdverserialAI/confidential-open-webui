@@ -51,7 +51,7 @@ entry with this metadata:
 ```
 
 The model ID must be canonical (`publisher/model`), for example
-`lordx64/cyberglm`. The browser verifies that the selected ID matches the active
+`Adverserial/cyberseek`. The browser verifies that the selected ID matches the active
 public policy. The older `meta.confidential_verification` structure remains
 accepted during migration.
 
@@ -68,7 +68,7 @@ They contain no private key, model credential, or billing secret.
 | `CONFIDENTIAL_BILLING_BASE_URL` | `https://billing.adverserial.ai` — entitlement authority. |
 | `CONFIDENTIAL_RECEIPT_ISSUER` | `https://verify.adverserial.ai`. |
 | `CONFIDENTIAL_RECEIPT_AUDIENCE` | The audience accepted by the deployed proxy, presently `https://chat.adverserial.ai`. Do not change it until the proxy policy is intentionally rotated. |
-| `CONFIDENTIAL_ALLOWED_MODELS` | Comma-separated canonical IDs, initially `lordx64/cyberglm`. |
+| `CONFIDENTIAL_ALLOWED_MODELS` | Comma-separated canonical IDs, initially `Adverserial/cyberseek`. |
 | `CONFIDENTIAL_MAX_OUTPUT_TOKENS` | Maximum output bound used in an entitlement, initially `65536`. |
 
 `api.adverserial.ai` must permit `https://chat.adverserial.ai` with one

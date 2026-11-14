@@ -82,7 +82,11 @@ class BillingHandoffTests(unittest.TestCase):
     def test_handoff_is_a_short_lived_signed_fixed_destination_assertion(self):
         issued_at = 1_700_000_000
         compact = self.router._mint_billing_handoff(
+<<<<<<< HEAD
             email='Operator@Example.COM', user_id='operator-id', destination='foothold', now=issued_at
+=======
+            email='  Operator@Example.COM ', destination='trinity', now=issued_at
+>>>>>>> 5271ecf4f (Launch CyberSeek chat routing)
         )
         encoded_header, encoded_claims, encoded_signature = compact.split('.')
         header = json.loads(_base64url_decode(encoded_header))
@@ -97,7 +101,7 @@ class BillingHandoffTests(unittest.TestCase):
         self.assertEqual(claims['typ'], 'adverserial-billing-chat-handoff/v1')
         self.assertEqual(claims['sub'], 'operator@example.com')
         self.assertEqual(claims['uid'], 'operator-id')
-        self.assertEqual(claims['destination'], 'foothold')
+        self.assertEqual(claims['destination'], 'trinity')
         self.assertEqual(claims['iat'], issued_at)
         self.assertEqual(claims['exp'], issued_at + 60)
         self.assertRegex(claims['jti'], r'^[0-9a-f-]{36}$')
