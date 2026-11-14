@@ -3,9 +3,9 @@
 # Preserve selections saved by older browser sessions while exposing canonical
 # IDs to API clients. Never substitute one model family for another.
 MODEL_ID_ALIASES = {
-    'Adverserial/cyberseek': 'adverserial/cyberseek',
-    'cyberseek': 'adverserial/cyberseek',
-    'CyberSeek': 'adverserial/cyberseek',
+    'Adverserial/cyberseek': 'Adverserial/cyberseek',
+    'cyberseek': 'Adverserial/cyberseek',
+    'CyberSeek': 'Adverserial/cyberseek',
     'cyberkimi': 'lordx64/cyberkimi',
     'CyberKimi': 'lordx64/cyberkimi',
     'cyberglm': 'lordx64/cyberglm',
@@ -34,5 +34,7 @@ def public_model_catalog(models):
     return [
         model for model in models
         if MODEL_ID_ALIASES.get(model['id'], model['id']) not in legacy
-        and MODEL_ID_ALIASES.get(model['id']) not in ids
+        and (model['id'] not in MODEL_ID_ALIASES
+             or MODEL_ID_ALIASES[model['id']] == model['id']
+             or MODEL_ID_ALIASES[model['id']] not in ids)
     ]

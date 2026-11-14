@@ -56,7 +56,7 @@ def _https_url(name: str, default: str, *, required_path: str | None = None) -> 
 
 
 def _models() -> tuple[str, ...]:
-    configured = os.getenv("CONFIDENTIAL_ALLOWED_MODELS", "adverserial/cyberseek")
+    configured = os.getenv("CONFIDENTIAL_ALLOWED_MODELS", "Adverserial/cyberseek")
     values = tuple(value.strip() for value in configured.split(",") if value.strip())
     if not values or any(not _CANONICAL_MODEL.fullmatch(value) for value in values):
         raise RuntimeError("CONFIDENTIAL_ALLOWED_MODELS must contain canonical publisher/model IDs")
