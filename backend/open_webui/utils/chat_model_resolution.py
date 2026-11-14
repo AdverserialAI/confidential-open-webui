@@ -3,9 +3,9 @@
 # Preserve selections saved by older browser sessions while exposing canonical
 # IDs to API clients. Never substitute one model family for another.
 MODEL_ID_ALIASES = {
-    'Adverserial/cyberseek': 'Adverserial/cyberseek',
-    'cyberseek': 'Adverserial/cyberseek',
-    'CyberSeek': 'Adverserial/cyberseek',
+    'adverserial/cyberseek': 'adverserial/cyberseek',
+    'cyberseek': 'adverserial/cyberseek',
+    'CyberSeek': 'adverserial/cyberseek',
     'cyberkimi': 'lordx64/cyberkimi',
     'CyberKimi': 'lordx64/cyberkimi',
     'cyberglm': 'lordx64/cyberglm',

@@ -19,13 +19,13 @@ class ModelResolutionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_current_canonical_model_needs_no_refresh(self):
         refresh = AsyncMock()
-        model_id = 'Adverserial/cyberseek'
+        model_id = 'adverserial/cyberseek'
         self.assertEqual(await resolve(model_id, self.request(model_id), refresh, None), model_id)
         refresh.assert_not_awaited()
 
     async def test_cyberseek_aliases_resolve_to_cyberseek(self):
-        for model_id in ('cyberseek', 'CyberSeek', 'Adverserial/cyberseek'):
-            self.assertEqual(await resolve(model_id, self.request('Adverserial/cyberseek'), AsyncMock(), None), 'Adverserial/cyberseek')
+        for model_id in ('cyberseek', 'CyberSeek', 'adverserial/cyberseek'):
+            self.assertEqual(await resolve(model_id, self.request('adverserial/cyberseek'), AsyncMock(), None), 'adverserial/cyberseek')
 
     async def test_legacy_models_and_browser_aliases_are_request_only(self):
         old_ids = ('lordx64/cyberkimi', 'lordx64/cyberglm', 'CyberKimi', 'cyberkimi',
@@ -33,22 +33,22 @@ class ModelResolutionTests(unittest.IsolatedAsyncioTestCase):
         for old_id in old_ids:
             refresh = AsyncMock()
             with self.assertRaisesRegex(ValueError, 'available only on request'):
-                await resolve(old_id, self.request(old_id, 'Adverserial/cyberseek'), refresh, None)
+                await resolve(old_id, self.request(old_id, 'adverserial/cyberseek'), refresh, None)
             refresh.assert_not_awaited()
 
     async def test_nonempty_stale_registry_refreshes_on_missing_model(self):
         request = self.request('lordx64/cyberkimi')
         user = object()
         async def update(req, **kwargs):
-            req.app.state.MODELS['Adverserial/cyberseek'] = {}
+            req.app.state.MODELS['adverserial/cyberseek'] = {}
         refresh = AsyncMock(side_effect=update)
-        self.assertEqual(await resolve('cyberseek', request, refresh, user), 'Adverserial/cyberseek')
+        self.assertEqual(await resolve('cyberseek', request, refresh, user), 'adverserial/cyberseek')
         refresh.assert_awaited_once_with(request, refresh=True, user=user)
 
     async def test_unknown_model_fails_after_one_refresh(self):
         refresh = AsyncMock()
         with self.assertRaisesRegex(ValueError, 'Model not found'):
-            await resolve('unknown-model', self.request('Adverserial/cyberseek'), refresh, None)
+            await resolve('unknown-model', self.request('adverserial/cyberseek'), refresh, None)
         refresh.assert_awaited_once()
 
     async def test_other_configured_models_keep_their_ids(self):
@@ -58,8 +58,8 @@ class ModelResolutionTests(unittest.IsolatedAsyncioTestCase):
 class PublicCatalogTests(unittest.TestCase):
     def test_legacy_models_and_aliases_are_hidden(self):
         models = [{'id': 'cyberglm'}, {'id': 'lordx64/cyberglm'}, {'id': 'lordx64/cyberkimi'},
-                  {'id': 'cyberseek'}, {'id': 'Adverserial/cyberseek'}]
-        self.assertEqual([m['id'] for m in module.public_model_catalog(models)], ['Adverserial/cyberseek'])
+                  {'id': 'cyberseek'}, {'id': 'adverserial/cyberseek'}]
+        self.assertEqual([m['id'] for m in module.public_model_catalog(models)], ['adverserial/cyberseek'])
         self.assertEqual(len(models), 5)
 
     def test_unrelated_models_are_preserved(self):
