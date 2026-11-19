@@ -209,6 +209,7 @@ from open_webui.utils.asgi_middleware import AppHTTPMiddleware
 from open_webui.utils.asgi_middleware import (
     ChatDomainSplitMiddleware,
     ConfidentialOnlyMiddleware,
+    TransportMiddleware,
 )
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.auth import (
@@ -820,6 +821,9 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+# HTTPS only, and no caching of account answers (see TransportMiddleware). It reads no request body.
+app.add_middleware(TransportMiddleware)
 
 # adverserial: outermost — platform.adverserial.ai serves API/auth only,
 # browser traffic 308s to chat.adverserial.ai (registered last = runs first).

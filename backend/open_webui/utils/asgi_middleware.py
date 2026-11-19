@@ -465,3 +465,63 @@ class ConfidentialOnlyMiddleware:
             },
         )
         await response(scope, receive, send)
+
+
+class TransportMiddleware:
+    """Serve people over HTTPS only, and keep account data out of caches.
+
+    * A request that reached the platform's router over plain HTTP (the router says so in
+      ``X-Forwarded-Proto``) is never served. A page request is sent to the same path on one of
+      the site's own fixed HTTPS names; anything else (a sign-in, a password change) is refused,
+      so credentials are not accepted in clear text. Only active on the hosting platform
+      (``DYNO`` set), so local development over HTTP is unaffected.
+    * Answers under ``/api/`` and ``/oauth/`` that do not already say how they may be cached are
+      marked ``no-store``: they carry account details and session tokens, which must not be kept
+      by a browser's history or by anything in between.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        import os
+
+        self.app = app
+        self.on_platform = bool(os.environ.get('DYNO'))
+        names = [name.strip().lower() for name in os.environ.get('HTTPS_ONLY_HOSTS', 'chat.adverserial.ai,platform.adverserial.ai').split(',')]
+        self.hosts = [name for name in names if name]
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope['type'] != 'http':
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get('headers') or [])
+        if self.on_platform and self.hosts:
+            proto = headers.get(b'x-forwarded-proto', b'https').decode('latin-1').split(',')[-1].strip().lower()
+            if proto == 'http':
+                method = scope.get('method', 'GET').upper()
+                if method in ('GET', 'HEAD'):
+                    asked = headers.get(b'host', b'').decode('latin-1').split(':')[0].strip().lower()
+                    host = asked if asked in self.hosts else self.hosts[0]      # never a name taken from the request
+                    query = scope.get('query_string', b'')
+                    location = f"https://{host}{scope.get('raw_path', scope.get('path', '/').encode()).decode('latin-1')}" + (
+                        '?' + query.decode('latin-1') if query else '')
+                    await send({'type': 'http.response.start', 'status': 308,
+                                'headers': [(b'location', location.encode('latin-1')), (b'content-length', b'0'), (b'cache-control', b'no-store')]})
+                    await send({'type': 'http.response.body', 'body': b''})
+                    return
+                body = b'{"detail":"HTTPS required"}'
+                await send({'type': 'http.response.start', 'status': 400,
+                            'headers': [(b'content-type', b'application/json'), (b'content-length', str(len(body)).encode()), (b'cache-control', b'no-store')]})
+                await send({'type': 'http.response.body', 'body': body})
+                return
+        path = scope.get('path', '')
+        if not (path.startswith('/api/') or path.startswith('/oauth/')):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_private(message: Message) -> None:
+            if message['type'] == 'http.response.start':
+                response_headers = MutableHeaders(scope=message)
+                if 'cache-control' not in response_headers:
+                    response_headers['Cache-Control'] = 'no-store'
+            await send(message)
+
+        await self.app(scope, receive, send_private)

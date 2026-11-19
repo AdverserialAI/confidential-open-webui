@@ -97,6 +97,20 @@ log = logging.getLogger(__name__)
 # Forgive us our failed attempts, as we forgive those
 # who exceed their allotted rate against this gate.
 signin_rate_limiter = RateLimiter(limit=5 * 3, window=60 * 3)
+# New accounts from one address: a handful, then wait. Sign-up answers differently for an address that
+# already has an account, so without a limit it could be used to test a whole list of addresses, or to
+# create accounts in bulk.
+signup_rate_limiter = RateLimiter(limit=5, window=60 * 10)
+
+
+def _client_address(request: Request) -> str:
+    """The caller's address. On the hosting platform the router appends the real one last in X-Forwarded-For."""
+    forwarded = request.headers.get('x-forwarded-for', '')
+    if os.environ.get('DYNO') and forwarded:
+        return forwarded.split(',')[-1].strip()
+    return request.client.host if request.client else 'unknown'
+
+
 # Best-effort throttle only: there is no caller identity before the provider answers,
 # and deployments may derive request.client from proxy headers.
 token_exchange_rate_limiter = (
@@ -971,6 +985,9 @@ async def signup(
     db: AsyncSession = Depends(get_async_session),
 ):
     has_users = await Users.has_users(db=db)
+
+    if has_users and await signup_rate_limiter.is_limited(request.app.state.redis, 'signup:' + _client_address(request)):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED)
 
     if WEBUI_AUTH:
         if has_users:
