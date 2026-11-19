@@ -40,7 +40,9 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 COPY package.json package-lock.json ./
-RUN npm ci --force
+# onnxruntime-node's install step tries to download GPU (CUDA) binaries that the frontend build never
+# uses, and that download now answers 404, which failed the whole build. Skip it.
+RUN ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci --force
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
