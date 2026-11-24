@@ -1,5 +1,14 @@
 # A+ confidential inference delivery plan
 
+> **Historical planning document (October 2026).** It is a plan, not a
+> description of what is deployed, and it is kept for the record. Items that
+> were built differently or not at all: there is no `cc-api.staging` host; the
+> model server is on an internal Docker network rather than loopback; usage
+> records go directly to billing with a signature, not over mTLS; the policy
+> is not signed; and reproducible container builds have not been demonstrated.
+> For the current state see the [README](../README.md) and
+> [confidential-infra `deployed/`](https://github.com/AdverserialAI/confidential-infra/tree/main/deployed).
+
 ## Goal
 
 Build a confidential inference service whose public evidence can pass every applicable layer in the Confidential Inference attestation monitor:

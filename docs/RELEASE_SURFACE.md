@@ -14,3 +14,7 @@ The provenance workflow is tag-only and pins every credentialed GitHub Action
 to an immutable commit. A deployment should reference a tagged release archive
 or its published digest, then compare the served identity manifest with that
 release before treating the browser build as the expected confidential client.
+
+The hosted deployment at `chat.adverserial.ai` does not yet meet this: it is
+built from the `main` branch as a container, and its identity manifests report
+`"status": "development"`. The latest tagged release is `v0.2.6` (2026-10-09).

@@ -1,8 +1,17 @@
 # Confidential Open WebUI transport
 
-This fork keeps Open WebUI's normal account experience, including Google OAuth,
-but gives registered confidential models a separate browser-only inference path.
-It does **not** change the CVM or `attest-proxy`.
+This fork keeps Open WebUI's account and session handling but gives registered
+confidential models a separate browser-only inference path. It does **not**
+change the CVM or `attest-proxy`.
+
+> **Sign-in on the hosted deployment.** This document was written when users
+> signed in through Open WebUI's own Google OAuth. Since 2026-11-24 the hosted
+> chat runs with `ACCOUNTS_GATEWAY` on: sign-in, sign-up, Google login and
+> password reset happen at `accounts.adverserial.ai`, which hands the browser
+> to this application with a one-time signed assertion
+> (`POST /api/v1/auths/accounts/exchange`). Where the text below says "Google
+> OAuth" or "Open WebUI OAuth", read "the accounts service" for the hosted
+> deployment. The inference path is unchanged.
 
 ## Request path
 
@@ -33,9 +42,11 @@ proof. The browser encrypts every request before it leaves the device, then
 sends the EHBP envelope directly to the attested API. Open WebUI never receives
 the envelope or completion stream.
 
-Confidential transcripts are held only in the active browser tab. The UI blocks
-normal Open WebUI persistence after a confidential turn so a later save cannot
-copy that transcript into the standard chat-history database.
+Confidential transcripts never reach the server. They are saved in the
+browser's IndexedDB (see "Browser-only transcript storage" below), or kept in
+memory for the current tab only when Temporary Chat is on. This distribution
+does not mount Open WebUI's chat-history routes, so a transcript cannot be
+copied into a server database.
 
 ## Register a confidential model
 
@@ -51,7 +62,7 @@ entry with this metadata:
 ```
 
 The model ID must be canonical (`publisher/model`), for example
-`Adverserial/cyberseek`. The browser verifies that the selected ID matches the active
+`adverserial/cyberseek` (lowercase). The browser verifies that the selected ID matches the active
 public policy. The older `meta.confidential_verification` structure remains
 accepted during migration.
 
@@ -64,11 +75,11 @@ They contain no private key, model credential, or billing secret.
 | --- | --- |
 | `CONFIDENTIAL_API_BASE_URL` | `https://api.adverserial.ai/v1` — the browser-direct, CORS-enabled confidential API origin. |
 | `CONFIDENTIAL_ATTESTATION_URL` | `https://api.adverserial.ai/attestation` — fresh evidence endpoint. |
-| `CONFIDENTIAL_POLICY_URL` | `https://verify.adverserial.ai/policies/production.json` — signed/public runtime policy. |
+| `CONFIDENTIAL_POLICY_URL` | `https://verify.adverserial.ai/policies/production.json` — the public runtime policy. It is served over HTTPS and is not signed. |
 | `CONFIDENTIAL_BILLING_BASE_URL` | `https://billing.adverserial.ai` — entitlement authority. |
 | `CONFIDENTIAL_RECEIPT_ISSUER` | `https://verify.adverserial.ai`. |
 | `CONFIDENTIAL_RECEIPT_AUDIENCE` | The audience accepted by the deployed proxy, presently `https://chat.adverserial.ai`. Do not change it until the proxy policy is intentionally rotated. |
-| `CONFIDENTIAL_ALLOWED_MODELS` | Comma-separated canonical IDs, initially `Adverserial/cyberseek`. |
+| `CONFIDENTIAL_ALLOWED_MODELS` | Comma-separated canonical IDs. Default `adverserial/cyberseek`. |
 | `CONFIDENTIAL_MAX_OUTPUT_TOKENS` | Maximum output bound used in an entitlement, initially `65536`. |
 
 `api.adverserial.ai` must permit `https://chat.adverserial.ai` with one
@@ -139,7 +150,7 @@ tools, file metadata, and server-generated task state.
 
 A local confidential conversation receives an opaque ID in the browser URL so a
 refresh can restore it from that browser profile. The **Delete local
-transcript** action in the Verification Center deletes that IndexedDB record,
+conversation** action deletes that IndexedDB record,
 clears the local route ID, and resets the in-memory transcript. Clearing site
 data in the browser removes it as well.
 
@@ -163,6 +174,7 @@ confidential turn begins.
 | Browser IndexedDB | Local confidential transcript | Yes, only on the user's device |
 
 Other Open WebUI features—standard models, shared chats, file uploads,
-knowledge bases, tools, and ordinary settings—retain their usual persistence
-behavior. The confidential text-only route rejects those features rather than
-falling back to a server-stored conversation.
+knowledge bases and tools—are not available in this distribution: their server
+routes are neither mounted nor allow-listed (see
+[`ROUTE_ALLOWLIST.md`](./ROUTE_ALLOWLIST.md)). There is no fallback to a
+server-stored conversation.

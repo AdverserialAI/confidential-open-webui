@@ -14,4 +14,4 @@ The attested runtime receives the encrypted prompt and produces an encrypted res
 
 ## Release provenance
 
-A tagged build injects `/release.json` containing the immutable repository, tag, source commit and source-tree identifier. GitHub Actions attaches build provenance to the release artifact. The release manifest is a provenance assertion, not a substitute for verifying runtime hardware evidence; the browser verifies both independently.
+The hosted deployment is currently built from `main`, not from a tag, and serves a `development` manifest; the following describes tagged builds. A tagged build injects `/release.json` containing the immutable repository, tag, source commit and source-tree identifier. GitHub Actions attaches build provenance to the release artifact. The release manifest is a provenance assertion, not a substitute for verifying runtime hardware evidence; the browser verifies both independently.
