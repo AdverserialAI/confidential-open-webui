@@ -1,5 +1,30 @@
 # Confidential inference architecture
 
+> **Historical design document (October 2026).** It was written before the
+> confidential path went live and is kept for the record. Its "Current path"
+> section no longer describes production, and several "target" details were
+> built differently. What is true today:
+>
+> - `api.adverserial.ai` is a CNAME to a Phala gateway that passes TLS through;
+>   TLS terminates in `attest-proxy` inside the confidential VM. There is no
+>   TLS-terminating GPU proxy in front of it.
+> - This chat sends EHBP-encrypted requests from the browser directly to that
+>   endpoint. HPKE/EHBP body encryption and signed per-response receipts are
+>   implemented, not open items.
+> - The model server (SGLang) is on an internal Docker network inside the VM,
+>   not on loopback, and has no published port.
+> - The proxy does not call billing in the request path and does not receive
+>   API keys. It verifies a short-lived billing entitlement locally. Usage
+>   records are signed in the VM and posted directly to billing over TLS;
+>   mTLS is not used.
+> - Receipt, meter, EHBP and TLS keys are generated inside the VM (since
+>   `attest-proxy` `v0.1.0-rc.31`; earlier releases used operator-generated
+>   seeds).
+> - The published policy is served over HTTPS and is not signed.
+>
+> The deployed composition is documented in
+> [confidential-infra `deployed/`](https://github.com/AdverserialAI/confidential-infra/tree/main/deployed).
+
 This document separates the **current transport path** from the **target verified path**. The target is deliberately narrow and testable: prompt and completion content is decrypted only in an attested confidential VM. Billing remains outside that boundary and receives account, entitlement, and usage metadata only.
 
 ## Trust boundary and precise claim

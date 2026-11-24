@@ -4,7 +4,7 @@ The public upstream history intentionally remains available for license and audi
 
 `ConfidentialOnlyMiddleware` is outermost in `backend/open_webui/main.py`. It rejects every API path unless its exact path *and HTTP method* are part of the confidential browser contract:
 
-- sign-in/out, password/profile/timezone changes, and the signed-in session lookup;
+- sign-in/out, password/profile/timezone changes, and the signed-in session lookup (with `ACCOUNTS_GATEWAY` on, as on the hosted deployment, sign-in, sign-up and password change answer only the accounts service, and the session is created by the one-time exchange at `/api/v1/auths/accounts/exchange`);
 - the current user's UI settings and profile image;
 - configuration and confidential-model discovery;
 - confidential runtime configuration, count-only account display, entitlement issuance, and the one-time billing handoff; and
