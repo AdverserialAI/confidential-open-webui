@@ -24,7 +24,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -142,6 +142,8 @@ from open_webui.models.functions import Functions
 from open_webui.models.messages import Messages
 from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
+from open_webui.utils import accounts_gateway
+from open_webui.routers import accounts_gateway as accounts_gateway_router
 from open_webui.routers import (
     analytics,
     audio,
@@ -837,6 +839,11 @@ app.add_middleware(ConfidentialOnlyMiddleware)
 # helpers. Standard OpenAI/Ollama, chat, files, tools, retrieval, task,
 # automation and WebSocket endpoints are not mounted in this distribution.
 app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
+# Sign-in through the accounts service: a handoff for browsers, signed calls for that service.
+app.include_router(accounts_gateway_router.router, prefix='/api/v1/auths/accounts', tags=['auths'])
+if accounts_gateway.misconfigured():
+    # Closed, not open: with the switch on and nothing to verify against, nobody can sign in.
+    log.error('ACCOUNTS_GATEWAY is on but its key or addresses are missing or malformed: sign-in is closed until this is fixed.')
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
 app.include_router(confidential.router, prefix='/api/v1/confidential', tags=['confidential'])
 
@@ -2283,7 +2290,7 @@ async def get_app_config(request: Request):
             # is disabled, without clearing the admin's provider configuration.
             'providers': (
                 {name: provider.get('name', name) for name, provider in OAUTH_PROVIDERS.items()}
-                if config.get('oauth.enable', True)
+                if config.get('oauth.enable', True) and not accounts_gateway.enforced()
                 else {}
             ),
             'auto_redirect': config.get('oauth.auto_redirect'),
@@ -2292,6 +2299,8 @@ async def get_app_config(request: Request):
             # --- Public: required by login/signup page pre-auth ---
             'auth': WEBUI_AUTH,
             'auth_trusted_header': bool(WEBUI_AUTH_TRUSTED_EMAIL_HEADER),
+            # Where people sign in when this chat no longer does it itself; absent otherwise.
+            **({'accounts_gateway': accounts_gateway.accounts_origin()} if accounts_gateway.enforced() and accounts_gateway.accounts_origin() else {}),
             'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
             'enable_ldap': config.get('ldap.enable'),
             'enable_signup': config.get('ui.enable_signup'),
@@ -2788,6 +2797,11 @@ async def oauth_client_callback(
 
 @app.get('/oauth/{provider}/login')
 async def oauth_login(provider: str, request: Request):
+    if accounts_gateway.enforced():
+        # Google sign-in lives at the accounts service now, second step included.
+        if not accounts_gateway.accounts_origin():
+            raise HTTPException(status_code=503, detail='Sign-in is temporarily unavailable.')
+        return RedirectResponse(accounts_gateway.accounts_origin() + '/sso/chat', status_code=303)
     return await oauth_manager.handle_login(request, provider)
 
 
@@ -2808,6 +2822,11 @@ async def oauth_login_callback(
     3. If no match and ``ENABLE_OAUTH_SIGNUP`` is enabled, create a new user
        (fails if the email is already registered).
     """
+    if accounts_gateway.enforced():
+        # No session is ever issued from a provider callback here: that would skip the second step.
+        if not accounts_gateway.accounts_origin():
+            raise HTTPException(status_code=503, detail='Sign-in is temporarily unavailable.')
+        return RedirectResponse(accounts_gateway.accounts_origin() + '/sso/chat', status_code=303)
     return await oauth_manager.handle_callback(request, provider, response, db=db)
 
 

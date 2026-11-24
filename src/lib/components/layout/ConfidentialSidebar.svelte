@@ -145,7 +145,8 @@
 		await userSignOut().catch(() => undefined);
 		localStorage.removeItem('token');
 		user.set(undefined);
-		await goto('/auth?redirect=%2F');
+		// state=logout tells the sign-in page this was deliberate, so it does not sign straight back in.
+		await goto('/auth?redirect=%2F&state=logout');
 	};
 
 	const handleChange = () => {

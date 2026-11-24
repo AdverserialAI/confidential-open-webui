@@ -158,6 +158,33 @@ class ConfidentialOnlyMiddlewareTests(unittest.TestCase):
         self.assertTrue(self.middleware._allows_cookie_mutation(same_origin_scope))
         self.assertTrue(self.middleware._allows_cookie_mutation(bearer_scope))
 
+    def test_accounts_gateway_routes_take_only_their_own_callers(self):
+        allow = self.middleware._allows_cookie_mutation
+        exchange = '/api/v1/auths/accounts/exchange'
+        self.assertTrue(self.middleware._allows(exchange, 'POST'))
+        self.assertFalse(self.middleware._allows(exchange, 'GET'))
+        self.assertFalse(self.middleware._allows('/api/v1/auths/accounts/anything-else', 'POST'))
+
+        def post(path, **headers):
+            return {'method': 'POST', 'path': path,
+                    'headers': [(name.replace('_', '-').encode(), value.encode()) for name, value in headers.items()]}
+
+        # The handoff form: the accounts site, and nobody else, whatever else the request carries.
+        self.assertTrue(allow(post(exchange, origin='https://accounts.adverserial.ai')))
+        for origin in ('https://chat.adverserial.ai', 'https://evil.example', 'http://accounts.adverserial.ai', 'null'):
+            self.assertFalse(allow(post(exchange, origin=origin)), origin)
+        self.assertFalse(allow(post(exchange)))
+        self.assertFalse(allow(post(exchange, authorization='Bearer api-client-token')))
+        # Calls from the accounts service: never from a browser, even this chat's own pages.
+        for name in ('provision', 'link', 'revoke'):
+            path = '/api/v1/auths/accounts/' + name
+            self.assertTrue(self.middleware._allows(path, 'POST'))
+            self.assertTrue(allow(post(path)))
+            self.assertFalse(allow(post(path, origin='https://chat.adverserial.ai')))
+            self.assertFalse(allow(post(path, origin='https://accounts.adverserial.ai')))
+            self.assertFalse(allow(post(path, cookie='token=session-token')))
+            self.assertFalse(allow(post(path, sec_fetch_site='same-origin')))
+
     def test_websocket_connections_are_explicitly_closed(self):
         sent = []
         received = []

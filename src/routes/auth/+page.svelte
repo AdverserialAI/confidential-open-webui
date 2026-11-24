@@ -44,6 +44,28 @@
 
 	let submitting = false;
 
+	// Set when the server says sign-in happens at the accounts service. This page then shows no
+	// form at all: it sends the visitor there, or offers a link if sending keeps failing.
+	let gatewayUrl = '';
+
+	// At most three automatic trips a minute, so a browser that cannot keep the session cookie
+	// ends on a page with a link instead of bouncing between the two sites.
+	const gatewayAttemptAllowed = () => {
+		try {
+			const now = Date.now();
+			const stored = JSON.parse(sessionStorage.getItem('accountsGatewayTries') ?? '[]');
+			const recent = (Array.isArray(stored) ? stored : []).filter(
+				(at) => typeof at === 'number' && now - at < 60000
+			);
+			if (recent.length >= 3) return false;
+			recent.push(now);
+			sessionStorage.setItem('accountsGatewayTries', JSON.stringify(recent));
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
 	const safeRedirectPath = (candidate: string | null) => {
 		if (!candidate || !candidate.startsWith('/') || candidate.startsWith('//')) return '/';
 		return candidate;
@@ -170,6 +192,27 @@
 			toast.error(error);
 		}
 
+		const backendConfig = $config ?? (await getBackendConfig().catch(() => null));
+		const gateway = backendConfig?.features?.accounts_gateway;
+		if (typeof gateway === 'string' && gateway.startsWith('https://')) {
+			const sessionUser = await getSessionUser().catch(() => null);
+			if (sessionUser) {
+				await setSessionUser(sessionUser, localStorage.getItem('redirectPath') || null, true);
+				return;
+			}
+			gatewayUrl = gateway;
+			if (logout) {
+				window.location.replace(`${gateway}/signed-out?from=chat`);
+				return;
+			}
+			if (!error && gatewayAttemptAllowed()) {
+				window.location.replace(`${gateway}/sso/chat`);
+				return;
+			}
+			loaded = true;
+			return;
+		}
+
 		await oauthCallbackHandler();
 		form = $page.url.searchParams.get('form');
 
@@ -218,7 +261,26 @@
 
 	<div class="w-full absolute top-0 left-0 right-0 h-8 drag-region" />
 
-	{#if loaded}
+	{#if loaded && gatewayUrl}
+		<div
+			class="fixed bg-transparent min-h-screen w-full flex justify-center z-50 text-black dark:text-white"
+			id="auth-gateway"
+		>
+			<div class="my-auto pb-10 w-full px-10 sm:max-w-md text-center">
+				<div class="text-2xl font-normal">Sign in to continue</div>
+				<div class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+					One Adverserial AI account opens Chat, Billing and Agents.
+				</div>
+				<a
+					class="mt-6 block w-full rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm py-2.5"
+					href={`${gatewayUrl}/sso/chat`}>Sign in</a
+				>
+				<a class="mt-3 block text-sm underline" href={`${gatewayUrl}/signup?next=%2Fsso%2Fchat`}
+					>Create an account</a
+				>
+			</div>
+		</div>
+	{:else if loaded}
 		<div
 			class="fixed bg-transparent min-h-screen w-full flex justify-center z-50 text-black dark:text-white"
 			id="auth-container"

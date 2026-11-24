@@ -324,6 +324,11 @@ class ConfidentialOnlyMiddleware:
         '/api/v1/auths/signup': frozenset({'POST'}),
         '/api/v1/auths/ldap': frozenset({'POST'}),
         '/api/v1/auths/signout': frozenset({'POST'}),
+        # Sign-in through the accounts service (utils/accounts_gateway.py).
+        '/api/v1/auths/accounts/exchange': frozenset({'POST'}),
+        '/api/v1/auths/accounts/provision': frozenset({'POST'}),
+        '/api/v1/auths/accounts/link': frozenset({'POST'}),
+        '/api/v1/auths/accounts/revoke': frozenset({'POST'}),
         '/api/v1/auths/update/profile': frozenset({'POST'}),
         '/api/v1/auths/update/timezone': frozenset({'POST'}),
         '/api/v1/auths/update/password': frozenset({'POST'}),
@@ -407,6 +412,15 @@ class ConfidentialOnlyMiddleware:
             allowed.add(f'http://{domain}')
         return origin.strip().lower().rstrip('/') in allowed
 
+    _ACCOUNTS_HANDOFF_PATH = '/api/v1/auths/accounts/exchange'
+    _ACCOUNTS_CALL_PREFIX = '/api/v1/auths/accounts/'
+
+    @staticmethod
+    def _is_accounts_origin(origin: str) -> bool:
+        # Operator-controlled, never request input; HTTPS only.
+        allowed = os.getenv('ACCOUNTS_GATEWAY_ORIGIN', 'https://accounts.adverserial.ai').strip().rstrip('/').lower()
+        return allowed.startswith('https://') and origin.strip().rstrip('/').lower() == allowed
+
     def _allows_cookie_mutation(self, scope: Scope) -> bool:
         """Require a same-origin browser for state changes made with a cookie.
 
@@ -422,6 +436,14 @@ class ConfidentialOnlyMiddleware:
         if scope.get('method', '').upper() not in self._UNSAFE_METHODS:
             return True
         headers = _scope_headers(scope)
+        path = scope.get('path', '') or '/'
+        if path == self._ACCOUNTS_HANDOFF_PATH:
+            # The one cross-site form this chat accepts: the accounts site posting a signed,
+            # one-time handoff. Only that site's Origin passes; the route checks the signature.
+            return self._is_accounts_origin(headers.get('origin', ''))
+        if path.startswith(self._ACCOUNTS_CALL_PREFIX):
+            # Calls from the accounts service itself. No browser may make them.
+            return not (headers.get('origin') or headers.get('cookie') or headers.get('sec-fetch-site'))
         if self._has_bearer_credential(headers):
             return True
         origin = headers.get('origin', '')

@@ -25,6 +25,7 @@ from open_webui.utils.identity import canonical_email as _validated_email, email
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
+    REDIS_KEY_PREFIX,
     ENABLE_INITIAL_ADMIN_SIGNUP,
     ENABLE_OAUTH_TOKEN_EXCHANGE,
     OAUTH_TOKEN_EXCHANGE_RATE_LIMIT,
@@ -79,6 +80,7 @@ from open_webui.utils.auth import (
 from open_webui.utils.groups import apply_default_group_assignment
 from open_webui.utils.misc import parse_duration, validate_email_format
 from open_webui.utils.rate_limit import RateLimiter
+from open_webui.utils import accounts_gateway
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -442,6 +444,11 @@ async def update_password(
     # Trusted-header auth mode delegates passwords to the reverse proxy
     if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+    if accounts_gateway.enforced():
+        # Passwords change at the accounts service only: by an emailed link, with its password
+        # rules, a notice to the owner and every session ended. A chat session alone must never
+        # be enough to set a password that also opens Billing and Agents.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail='Change your password at ' + (accounts_gateway.accounts_origin() or 'your account page') + '/forgot')
     if session_user:
         if session_user.oauth:
             # The account carries an OAuth identity (e.g., Google sign-in);
@@ -552,6 +559,8 @@ async def ldap_auth(
     form_data: LdapForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    if accounts_gateway.enforced():
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
     # Security checks FIRST - before loading any config
     if not await Config.get('ldap.enable'):
         raise HTTPException(400, detail='LDAP authentication is not enabled')
@@ -800,6 +809,27 @@ async def signin(
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
         )
 
+    if accounts_gateway.enforced():
+        # Only the accounts service may ask this chat to check a password, and each time it proves
+        # it with a signature over this exact request. Anyone else is turned away before the
+        # password is looked at, so this endpoint cannot be used to guess passwords around the
+        # limits and the second step that the accounts service applies.
+        try:
+            await accounts_gateway.server_call(request, 'signin', REDIS_KEY_PREFIX)
+        except accounts_gateway.Refused as error:
+            raise HTTPException(status_code=error.status, detail=error.detail) from None
+        # The answer is who the password belongs to, and nothing else: no session and no token.
+        # A right password is only the first step; the session is issued later, by the handoff,
+        # once the accounts service has finished the second step.
+        over_budget = await signin_rate_limiter.get_count(request.app.state.redis, form_data.email.lower()) >= signin_rate_limiter.limit
+        user = await Auths.authenticate_user(form_data.email.lower(), lambda pw: verify_password(form_data.password, pw), db=db)
+        if not user or not await Auths.is_user_active(user.id, db=db):
+            if over_budget:
+                raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED)
+            await signin_rate_limiter.is_limited(request.app.state.redis, form_data.email.lower())
+            raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+        return JSONResponse({'via': 'accounts-gateway', 'id': user.id, 'email': user.email}, headers={'Cache-Control': 'no-store'})
+
     auth_source = 'password'
 
     if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
@@ -984,6 +1014,10 @@ async def signup(
     form_data: SignupForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    if accounts_gateway.enforced():
+        # New accounts are created at the accounts service, which proves the address first.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
     has_users = await Users.has_users(db=db)
 
     if has_users and await signup_rate_limiter.is_limited(request.app.state.redis, 'signup:' + _client_address(request)):
